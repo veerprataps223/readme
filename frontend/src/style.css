@@ -1,0 +1,105 @@
+/* basic page + typography */
+:root {
+  --muted: rgba(255,255,255,0.6);
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  background: #000;
+  color: #fff;
+}
+
+/* card look */
+.card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  border: 1px solid rgba(255,255,255,0.03);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.6);
+}
+
+/* markdown preview */
+.markdown { color: #e6eef8; }
+.markdown h1 { color: #fff; font-size: 1.6rem; }
+.markdown h2 { color: #fff; margin-top: 1rem; }
+.markdown pre {
+  background: #071127;
+  padding: 1rem;
+  border-radius: .5rem;
+  overflow:auto;
+  color: #dbeafe;
+}
+.markdown code {
+  background: rgba(255,255,255,0.04);
+  padding: .15rem .35rem;
+  border-radius: .25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace;
+}
+
+/* small utilities */
+input::placeholder, textarea::placeholder { color: rgba(255,255,255,0.35); }
+button:disabled { opacity: 0.6; }
+
+/* include shake animation (fallback) */
+@keyframes shake {
+  0% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  50% { transform: translateX(6px); }
+  75% { transform: translateX(-4px); }
+  100% { transform: translateX(0); }
+}
+.shake {
+  animation: shake .45s cubic-bezier(.36,.07,.19,.97) both;
+  transform: translate3d(0,0,0);
+  backface-visibility: hidden;
+}
+/* Enhanced scrollbar styling */
+.markdown::-webkit-scrollbar {
+  width: 6px;
+}
+
+.markdown::-webkit-scrollbar-track {
+  background: rgba(255,255,255,0.05);
+  border-radius: 3px;
+}
+
+.markdown::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.2);
+  border-radius: 3px;
+}
+
+.markdown::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.3);
+}
+
+/* Enhanced button hover effects */
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+/* Loading shimmer effect */
+@keyframes shimmer {
+  0% { background-position: -468px 0; }
+  100% { background-position: 468px 0; }
+}
+
+.shimmer {
+  animation: shimmer 2s infinite linear;
+  background: linear-gradient(to right, transparent 0%, rgba(255,255,255,0.1) 50%, transparent 100%);
+  background-size: 468px 100%;
+}
+/* Animation keyframes */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
