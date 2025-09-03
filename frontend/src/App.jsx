@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Github, Download, Copy, RotateCcw, Play, Square, CheckCircle, XCircle, Loader, Code, FileText, Zap } from "lucide-react";
 
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL = "https://readme-666x.onrender.com";
 
 const renderMarkdown = (text) => {
   if (!text) return '';
@@ -297,6 +297,8 @@ export default function App() {
         .status-success { background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
         .status-error { background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
         .status-loading { background: rgba(124, 58, 237, 0.1); color: #a855f7; border: 1px solid rgba(124, 58, 237, 0.3); }
+        .card { background: rgba(255,255,255,0.02); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+        :root { --muted: #9ca3af; }
       `}</style>
 
       <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
