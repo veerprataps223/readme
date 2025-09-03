@@ -501,12 +501,19 @@ app.get("/health", async (req, res) => {
   }
 });
 
-
+app.listen(PORT, async () => {
+  console.log(`🚀 Enhanced Server running on http://localhost:${PORT}`);
+  console.log(`📊 Health check: http://localhost:${PORT}/health`);
+  console.log(`🤖 Test Gemini 2.0 Flash: GET http://localhost:${PORT}/test-gemini`);
+  console.log(`🔑 GitHub Token: ${process.env.GITHUB_TOKEN ? '✅' : '❌'}`);
+  console.log(`🔑 Gemini Key: ${process.env.GEMINI_API_KEY ? '✅' : '❌'}`);
+  console.log(`🔥 Using Gemini 2.0 Flash model`);
   
-// Test both APIs on startup
-setTimeout(async () => {
-  await checkGitHubRateLimit();
-  await testGeminiAPI();
-}, 1000);
+  // Test both APIs on startup
+  setTimeout(async () => {
+    await checkGitHubRateLimit();
+    await testGeminiAPI();
+  }, 1000);
+});
 
 export default app;

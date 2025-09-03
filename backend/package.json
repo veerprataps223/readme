@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node api/server.js"
+    "start": "node api/server.js",
+    "vercel-dev": "vercel dev"
   },
   "dependencies": {
     "@google/generative-ai": "^0.3.0",
