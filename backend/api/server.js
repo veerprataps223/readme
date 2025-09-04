@@ -226,7 +226,14 @@ async function analyzeRepository(files, repoData) {
     totalFiles: analysis.totalFiles,
     hasTests: analysis.features.has('Testing Suite'),
     hasDocker: analysis.technologies.has('Docker'),
-    hasCICD: analysis.features.has('CI/CD Pipeline')
+    hasCICD: analysis.features.has('CI/CD Pipeline'),
+    // Debug info to help troubleshoot
+    debug: {
+      totalLanguagesFound: analysis.languages.size,
+      totalTechFound: analysis.technologies.size,
+      totalFeaturesFound: analysis.features.size,
+      sampleFiles: files.slice(0, 5).map(f => ({ name: f.name, ext: f.name?.split('.').pop() }))
+    }
   };
 }
 

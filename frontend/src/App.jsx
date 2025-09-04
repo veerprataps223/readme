@@ -23,6 +23,20 @@ const renderMarkdown = (text) => {
   return html;
 };
 
+const isValidGitHubUrl = (url) => {
+  if (!url || typeof url !== 'string') return false;
+  
+  const trimmedUrl = url.trim();
+  
+  // Check if it contains github.com or is in owner/repo format
+  const patterns = [
+    /^(https?:\/\/)?(www\.)?github\.com\/[^\/\s]+\/[^\/\s]+/i,
+    /^[^\/\s]+\/[^\/\s]+$/
+  ];
+  
+  return patterns.some(pattern => pattern.test(trimmedUrl));
+};
+
 const sampleRepos = [
   { name: "microsoft/vscode", url: "https://github.com/microsoft/vscode" },
   { name: "facebook/react", url: "https://github.com/facebook/react" },
@@ -43,6 +57,7 @@ export default function App() {
   const [abortController, setAbortController] = useState(null);
   const [typingInterval, setTypingInterval] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [urlError, setUrlError] = useState("");
   const analysisRef = useRef(null);
   const previewRef = useRef(null);
 
@@ -80,6 +95,31 @@ export default function App() {
     }
   };
 
+  const validateUrl = (url) => {
+    if (!url.trim()) {
+      setUrlError("Please enter a repository URL");
+      return false;
+    }
+    
+    if (!isValidGitHubUrl(url)) {
+      setUrlError("Please enter a valid GitHub URL (e.g., https://github.com/owner/repository)");
+      return false;
+    }
+    
+    setUrlError("");
+    return true;
+  };
+
+  const handleUrlChange = (url) => {
+    setRepoUrl(url);
+    if (urlError) {
+      // Clear error if URL becomes valid
+      if (url.trim() && isValidGitHubUrl(url)) {
+        setUrlError("");
+      }
+    }
+  };
+
   const stopGeneration = () => {
     if (abortController) {
       abortController.abort();
@@ -100,8 +140,7 @@ export default function App() {
       return;
     }
 
-    if (!repoUrl.trim()) {
-      setError("Please enter a repository URL");
+    if (!validateUrl(repoUrl)) {
       return;
     }
 
@@ -112,6 +151,7 @@ export default function App() {
     setDisplayedText("");
     setAnalysis(null);
     setError("");
+    setUrlError("");
     setProgress("Analyzing repository...");
 
     try {
@@ -140,7 +180,6 @@ export default function App() {
           if (analysisRef.current) {
             analysisRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
           }
-          // After analysis section, scroll to preview when it appears
           setTimeout(() => {
             if (previewRef.current) {
               previewRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -240,6 +279,7 @@ export default function App() {
     setNeedsReset(false);
     setProgress("");
     setError("");
+    setUrlError("");
     setRepoUrl("");
     setLoading(false);
     setAbortController(null);
@@ -380,7 +420,7 @@ export default function App() {
             {sampleRepos.map((repo, i) => (
               <button 
                 key={i}
-                onClick={() => setRepoUrl(repo.url)} 
+                onClick={() => handleUrlChange(repo.url)} 
                 style={{
                   ...buttonStyle('secondary'),
                   padding: '8px 16px',
@@ -400,23 +440,38 @@ export default function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <input
                 value={repoUrl}
-                onChange={(e) => setRepoUrl(e.target.value)}
+                onChange={(e) => handleUrlChange(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && !loading && generateReadme()}
                 placeholder="https://github.com/owner/repository"
                 disabled={loading}
                 style={{
                   ...inputStyle,
-                  borderColor: error && !repoUrl.trim() ? 'rgba(239, 68, 68, 0.5)' : 'rgba(255,255,255,0.1)'
+                  borderColor: urlError ? 'rgba(239, 68, 68, 0.5)' : 'rgba(255,255,255,0.1)'
                 }}
                 onFocus={(e) => e.target.style.borderColor = '#667eea'}
-                onBlur={(e) => e.target.style.borderColor = 'rgba(255,255,255,0.1)'}
+                onBlur={(e) => e.target.style.borderColor = urlError ? 'rgba(239, 68, 68, 0.5)' : 'rgba(255,255,255,0.1)'}
               />
+              
+              {urlError && (
+                <div style={{ 
+                  padding: '12px 16px', 
+                  background: 'rgba(239, 68, 68, 0.1)', 
+                  border: '1px solid rgba(239, 68, 68, 0.3)', 
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <XCircle size={16} color="#f87171" />
+                  <span style={{ color: '#f87171', fontSize: '14px', fontWeight: '500' }}>{urlError}</span>
+                </div>
+              )}
               
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
                 <button 
                   onClick={generateReadme} 
-                  disabled={loading || !geminiStatus?.success} 
-                  style={{ ...buttonStyle('primary', loading || !geminiStatus?.success), minWidth: '160px', justifyContent: 'center' }}
+                  disabled={loading || !geminiStatus?.success || urlError} 
+                  style={{ ...buttonStyle('primary', loading || !geminiStatus?.success || urlError), minWidth: '160px', justifyContent: 'center' }}
                 >
                   {loading ? (
                     <><Loader size={18} className="pulse" /> Generating</>
@@ -475,189 +530,118 @@ export default function App() {
                       background: 'rgba(239, 68, 68, 0.8)',
                       border: 'none',
                       borderRadius: '6px',
-                      color: '#fff',
                       padding: '6px 12px',
+                      color: '#fff',
                       fontSize: '12px',
-                      cursor: 'pointer',
-                      fontWeight: '600'
+                      cursor: 'pointer'
                     }}
                   >
-                    Cancel
+                    <Square size={12} />
                   </button>
                 )}
               </div>
             )}
-
-            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-                <button 
-                  onClick={downloadReadme} 
-                  disabled={!readme} 
-                  style={buttonStyle('secondary', !readme)}
-                >
-                  <Download size={16} />
-                  Download
-                </button>
-                <button 
-                  onClick={copyToClipboard} 
-                  disabled={!readme} 
-                  style={buttonStyle('secondary', !readme)}
-                >
-                  {copied ? <CheckCircle size={16} color="#10b981" /> : <Copy size={16} />}
-                  {copied ? "Copied!" : "Copy"}
-                </button>
-                <button 
-                  onClick={resetAll} 
-                  style={buttonStyle('secondary')}
-                >
-                  <RotateCcw size={16} />
-                  Reset
-                </button>
-              </div>
-              {analysis && (
-                <div style={{ fontSize: '14px', color: 'var(--muted)' }}>
-                  Analyzed {analysis.analyzedFiles} of {analysis.totalFiles} files
-                </div>
-              )}
-            </div>
           </div>
         </div>
 
-        {/* Analysis Section */}
+        {/* Repository Analysis */}
         {analysis && (
           <div ref={analysisRef} className="card slide-in" style={{ borderRadius: '20px', padding: '32px', marginBottom: '32px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
-              <div style={{ 
-                width: '48px', height: '48px', 
-                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', 
-                borderRadius: '12px', 
-                display: 'flex', alignItems: 'center', justifyContent: 'center' 
-              }}>
-                <Code size={24} color="white" />
-              </div>
-              <h3 style={{ fontSize: '24px', fontWeight: '700', color: '#fff', margin: 0 }}>Repository Analysis</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+              <Code size={24} color="#06b6d4" />
+              <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#fff', margin: 0 }}>Repository Analysis</h2>
             </div>
             
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', 
-              gap: '20px' 
-            }}>
-              {[
-                { 
-                  label: "Primary Language", 
-                  value: analysis.mainLanguage, 
-                  color: "linear-gradient(135deg, #a855f7 0%, #7c3aed 100%)",
-                  icon: <Code size={20} color="white" />
-                },
-                { 
-                  label: "Technologies", 
-                  value: analysis.languages?.join(", "), 
-                  color: "linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)",
-                  icon: <FileText size={20} color="white" />
-                },
-                { 
-                  label: "Features Detected", 
-                  value: [
-                    analysis.hasTests && "Tests", 
-                    analysis.hasDocker && "Docker", 
-                    analysis.hasCICD && "CI/CD"
-                  ].filter(Boolean).join(" • ") || "Basic Setup", 
-                  color: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                  icon: <CheckCircle size={20} color="white" />
-                },
-                { 
-                  label: "Files Processed", 
-                  value: `${analysis.analyzedFiles} / ${analysis.totalFiles}`, 
-                  color: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
-                  icon: <FileText size={20} color="white" />
-                }
-              ].map((item, i) => (
-                <div key={i} className="card" style={{ padding: '24px', borderRadius: '16px' }}>
-                  <div style={{ 
-                    width: '40px', height: '40px', 
-                    background: item.color, 
-                    borderRadius: '10px', 
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    marginBottom: '16px'
-                  }}>
-                    {item.icon}
-                  </div>
-                  <h4 style={{ fontSize: '14px', fontWeight: '500', color: 'var(--muted)', marginBottom: '8px', margin: 0 }}>
-                    {item.label}
-                  </h4>
-                  <p style={{ fontSize: '16px', fontWeight: '600', color: '#fff', margin: 0, lineHeight: '1.4' }}>
-                    {item.value}
-                  </p>
-                </div>
-              ))}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px', marginBottom: '24px' }}>
+              <div style={{ padding: '16px', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '12px' }}>
+                <div style={{ color: '#10b981', fontSize: '14px', fontWeight: '600', marginBottom: '4px' }}>Language</div>
+                <div style={{ color: '#fff', fontSize: '18px', fontWeight: '700' }}>{analysis.language || 'Mixed'}</div>
+              </div>
+              <div style={{ padding: '16px', background: 'rgba(124, 58, 237, 0.1)', border: '1px solid rgba(124, 58, 237, 0.3)', borderRadius: '12px' }}>
+                <div style={{ color: '#a855f7', fontSize: '14px', fontWeight: '600', marginBottom: '4px' }}>Project Type</div>
+                <div style={{ color: '#fff', fontSize: '18px', fontWeight: '700' }}>{analysis.type || 'Application'}</div>
+              </div>
+              <div style={{ padding: '16px', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '12px' }}>
+                <div style={{ color: '#f59e0b', fontSize: '14px', fontWeight: '600', marginBottom: '4px' }}>Files Analyzed</div>
+                <div style={{ color: '#fff', fontSize: '18px', fontWeight: '700' }}>{analysis.fileCount || 'Multiple'}</div>
+              </div>
             </div>
-          </div>
-        )}
 
-        {/* Preview Section */}
-        {displayedText && (
-          <div ref={previewRef} className="card slide-in" style={{ borderRadius: '20px', padding: '32px' }}>
-            <div style={{ 
-              display: 'flex', 
-              flexDirection: 'column', 
-              gap: '16px',
-              marginBottom: '24px', 
-              paddingBottom: '24px', 
-              borderBottom: '1px solid rgba(255,255,255,0.1)' 
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <div style={{ 
-                  width: '48px', height: '48px', 
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', 
-                  borderRadius: '12px', 
-                  display: 'flex', alignItems: 'center', justifyContent: 'center' 
-                }}>
-                  <FileText size={24} color="white" />
-                </div>
-                <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#fff', margin: 0 }}>Generated README</h2>
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-                <button 
-                  onClick={copyToClipboard} 
-                  style={buttonStyle('secondary')}
-                >
-                  {copied ? <CheckCircle size={16} color="#10b981" /> : <Copy size={16} />}
-                  {copied ? "Copied!" : "Copy Markdown"}
-                </button>
-                <button 
-                  onClick={downloadReadme} 
-                  style={buttonStyle('primary')}
-                >
-                  <Download size={16} />
-                  Download
-                </button>
-              </div>
-            </div>
-            
-            <div 
-              data-preview-content 
-              className="markdown"
-              style={{ 
-                background: 'rgba(0,0,0,0.3)', 
-                borderRadius: '12px', 
-                padding: '24px', 
-                border: '1px solid rgba(255,255,255,0.05)', 
-                maxHeight: '600px', 
-                overflowY: 'auto',
-                lineHeight: '1.6'
-              }} 
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(displayedText) }} 
-            />
-            
-            {displayedText.length < readme.length && (
-              <div style={{ textAlign: 'center', marginTop: '24px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
-                  <Loader size={20} className="pulse" color="#06b6d4" />
-                  <span style={{ color: 'var(--muted)', fontWeight: '500' }}>AI is writing your documentation...</span>
+            {analysis.features && analysis.features.length > 0 && (
+              <div>
+                <h3 style={{ color: '#06b6d4', fontSize: '18px', fontWeight: '600', marginBottom: '12px' }}>Key Features Detected</h3>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {analysis.features.map((feature, i) => (
+                    <span key={i} style={{
+                      padding: '6px 12px',
+                      background: 'rgba(255,255,255,0.06)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '16px',
+                      fontSize: '12px',
+                      color: '#e6eef8'
+                    }}>
+                      {feature}
+                    </span>
+                  ))}
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* README Preview */}
+        {readme && (
+          <div ref={previewRef} className="slide-in">
+            <div className="card" style={{ borderRadius: '20px', padding: '32px', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <FileText size={24} color="#06b6d4" />
+                  <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#fff', margin: 0 }}>Generated README</h2>
+                </div>
+                
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  <button onClick={copyToClipboard} style={buttonStyle('secondary')}>
+                    {copied ? <CheckCircle size={16} color="#10b981" /> : <Copy size={16} />}
+                    {copied ? "Copied!" : "Copy"}
+                  </button>
+                  <button onClick={downloadReadme} style={buttonStyle('secondary')}>
+                    <Download size={16} />
+                    Download
+                  </button>
+                  <button onClick={resetAll} style={buttonStyle('secondary')}>
+                    <RotateCcw size={16} />
+                    New README
+                  </button>
+                </div>
+              </div>
+
+              <div 
+                data-preview-content
+                style={{
+                  background: 'rgba(0,0,0,0.3)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '12px',
+                  padding: '24px',
+                  maxHeight: '600px',
+                  overflow: 'auto',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
+                  fontSize: '14px',
+                  lineHeight: '1.6'
+                }}
+              >
+                <div dangerouslySetInnerHTML={{ __html: renderMarkdown(displayedText) }} />
+                {loading && displayedText.length < readme.length && (
+                  <div style={{ 
+                    display: 'inline-block', 
+                    width: '2px', 
+                    height: '20px', 
+                    background: '#06b6d4',
+                    animation: 'pulse 1s infinite',
+                    marginLeft: '2px'
+                  }} />
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>
