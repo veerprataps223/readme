@@ -13,7 +13,7 @@ app.use(cors({
   origin: [
     'http://localhost:3000', 
     'http://localhost:5173',
-    'https://your-app-name.vercel.app', // Replace with your actual Vercel URL
+    'https://readme-livid.vercel.app/', // Replace with your actual Vercel URL
     /\.vercel\.app$/, // Allow all Vercel preview deployments
     /\.netlify\.app$/, // If you switch to Netlify
   ],
