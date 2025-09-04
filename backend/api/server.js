@@ -164,6 +164,7 @@ CRITICAL: Return ONLY raw markdown content. Do NOT wrap it in code blocks. Do NO
 
 // Analyze files to provide context to Gemini
 // Enhanced analyze files function - replace the existing analyzeFiles function with this
+// Enhanced analyze files function - replace the existing analyzeFiles function with this
 async function analyzeFiles(files) {
   const analysis = {
     totalFiles: files.length,
