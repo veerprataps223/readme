@@ -274,7 +274,7 @@ export default function App() {
   });
 
   const inputStyle = {
-    width: '100%',
+    width: '96%',
     padding: '16px 20px',
     borderRadius: '12px',
     border: '2px solid rgba(255,255,255,0.1)',
