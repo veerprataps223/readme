@@ -7,10 +7,23 @@ dotenv.config();
 const app = express();
 
 app.use(express.json({ limit: '10mb' }));
+
+// Updated CORS configuration for production
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:5173'],
-  credentials: true
+  origin: [
+    'http://localhost:3000', 
+    'http://localhost:5173',
+    'https://your-app-name.vercel.app', // Replace with your actual Vercel URL
+    /\.vercel\.app$/, // Allow all Vercel preview deployments
+    /\.netlify\.app$/, // If you switch to Netlify
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Add preflight handling
+app.options('*', cors());
 
 const PORT = process.env.PORT || 5000;
 const GITHUB_API = "https://api.github.com";
@@ -71,7 +84,6 @@ function cleanMarkdownResponse(text) {
 
   return cleaned;
 }
-
 
 // Generate README using Gemini API
 async function generateReadmeWithGemini(repoInfo, files, repoData) {
@@ -316,20 +328,28 @@ app.get("/test-gemini", async (req, res) => {
     console.log('\n' + '='.repeat(50));
     console.log('🤖 Testing Gemini 2.0 Flash API Connection');
     console.log('='.repeat(50));
+    console.log('Request received from:', req.get('origin') || req.get('referer') || 'unknown');
     
     const result = await testGeminiAPI();
     
-    res.json({
+    const response = {
       success: result.success,
       message: result.success ? "Gemini 2.0 Flash API is working!" : "Gemini API test failed",
       model: "gemini-2.0-flash-exp",
       response: result.response || null,
       error: result.error || null,
       hasApiKey: !!process.env.GEMINI_API_KEY,
-      timestamp: new Date().toISOString()
-    });
+      timestamp: new Date().toISOString(),
+      server: 'render',
+      environment: process.env.NODE_ENV || 'development'
+    };
+
+    console.log('Sending response:', { success: response.success, hasApiKey: response.hasApiKey });
+    
+    res.json(response);
     
   } catch (error) {
+    console.error('Test endpoint error:', error.message);
     res.status(500).json({
       success: false,
       message: "Test failed",
@@ -480,7 +500,8 @@ app.get("/health", async (req, res) => {
         hasGeminiKey: !!process.env.GEMINI_API_KEY,
         hasGithubToken: !!process.env.GITHUB_TOKEN,
         nodeVersion: process.version,
-        port: PORT
+        port: PORT,
+        nodeEnv: process.env.NODE_ENV
       },
       github: {
         rateLimitRemaining: rateLimitInfo?.resources.core.remaining || 'unknown',
@@ -501,6 +522,16 @@ app.get("/health", async (req, res) => {
   }
 });
 
+// Add a simple root endpoint for testing
+app.get("/", (req, res) => {
+  res.json({
+    message: "README Generator API",
+    version: "2.0",
+    endpoints: ["/health", "/test-gemini", "/generate-readme"],
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.listen(PORT, async () => {
   console.log(`🚀 Enhanced Server running on http://localhost:${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
@@ -508,6 +539,7 @@ app.listen(PORT, async () => {
   console.log(`🔑 GitHub Token: ${process.env.GITHUB_TOKEN ? '✅' : '❌'}`);
   console.log(`🔑 Gemini Key: ${process.env.GEMINI_API_KEY ? '✅' : '❌'}`);
   console.log(`🔥 Using Gemini 2.0 Flash model`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   
   // Test both APIs on startup
   setTimeout(async () => {
