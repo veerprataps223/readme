@@ -5,572 +5,356 @@ import cors from "cors";
 
 dotenv.config();
 const app = express();
+const PORT = process.env.PORT || 5000;
+const GITHUB_API = "https://api.github.com";
+const GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent";
 
 app.use(express.json({ limit: '10mb' }));
-
-// Updated CORS configuration for production
 app.use(cors({
   origin: [
     'http://localhost:3000', 
     'http://localhost:5173',
-    'https://readme-livid.vercel.app/', // Replace with your actual Vercel URL
-    /\.vercel\.app$/, // Allow all Vercel preview deployments
-    /\.netlify\.app$/, // If you switch to Netlify
+    'https://readme-livid.vercel.app/',
+    /\.vercel\.app$/,
+    /\.netlify\.app$/,
   ],
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-
-// Add preflight handling
 app.options('*', cors());
 
-const PORT = process.env.PORT || 5000;
-const GITHUB_API = "https://api.github.com";
-const GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent";
-
-// Test Gemini API connection
-async function testGeminiAPI() {
-  if (!process.env.GEMINI_API_KEY) {
-    console.log('❌ No Gemini API key found');
-    return { success: false, error: 'No API key' };
-  }
-
-  try {
-    console.log('\n🧪 Testing Gemini 2.0 Flash API...');
-    const response = await fetch(`${GEMINI_API}?key=${process.env.GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: "Hello! Please respond with 'Gemini 2.0 Flash API is working!' to confirm the connection."
-          }]
-        }]
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.log('❌ Gemini API error:', response.status, errorText);
-      return { success: false, error: `HTTP ${response.status}: ${errorText}` };
-    }
-
-    const data = await response.json();
-    const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
-    
-    console.log('✅ Gemini 2.0 Flash API Response:', generatedText);
-    return { success: true, response: generatedText };
-    
-  } catch (error) {
-    console.log('❌ Gemini API test failed:', error.message);
-    return { success: false, error: error.message };
-  }
-}
-
-// Clean markdown response by removing first 12 characters and closing backticks
-function cleanMarkdownResponse(text) {
-  if (!text) return '';
-
-  let cleaned = text.trim();
-
-  // Remove opening ```markdown or ``` if present
-  cleaned = cleaned.replace(/^```(?:markdown)?\s*/i, '');
-
-  // Remove closing ```
-  cleaned = cleaned.replace(/```$/, '').trim();
-
-  return cleaned;
-}
-
-// Generate README using Gemini API
-async function generateReadmeWithGemini(repoInfo, files, repoData) {
-  if (!process.env.GEMINI_API_KEY) {
-    throw new Error('Gemini API key not configured');
-  }
-
-  // Analyze file content for context
-  const fileAnalysis = analyzeFiles(files);
-  
-  const prompt = `You are a technical documentation expert. Generate a comprehensive, professional README.md for this GitHub repository:
-
-**Repository:** ${repoData.full_name}
-**Description:** ${repoData.description || 'No description provided'}
-**Language:** ${repoData.language || 'Not specified'}
-**Stars:** ${repoData.stargazers_count || 0}
-**Files Analysis:**
-${fileAnalysis}
-
-**Requirements:**
-1. Create a complete, professional README.md
-2. Include appropriate sections: Title(Title should be bolder and bigger or should look different than other headings), Description, Features, Usage, Installation,tech stack etc.
-3. You can go a little more aggressive or deep within description , usage and features
-4. Make sure chronological order is title , description, features, usage, tech stack, installation and other things etc...
-4. Add relevant badges if applicable
-5. Include code examples if you can infer usage patterns
-6. Make it engaging and informative
-7. Use proper Markdown formatting
-8. Keep it concise but comprehensive
-
-CRITICAL: Return ONLY raw markdown content. Do NOT wrap it in code blocks. Do NOT use \`\`\`markdown. Start directly with # title. No code fences whatsoever.`;
-
-  try {
-    const response = await fetch(`${GEMINI_API}?key=${process.env.GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: prompt
-          }]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 2048,
-        }
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
-    }
-
-    const data = await response.json();
-    const generatedReadme = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    
-    if (!generatedReadme) {
-      throw new Error('No content generated by Gemini API');
-    }
-
-    // Clean the response to remove any markdown code block wrappers
-    const cleanedReadme = cleanMarkdownResponse(generatedReadme);
-    
-    console.log('🧹 Cleaned markdown response (removed code block wrappers)');
-    
-    return cleanedReadme;
-    
-  } catch (error) {
-    console.error('Gemini API generation failed:', error.message);
-    throw error;
-  }
-}
-
-// Analyze files to provide context to Gemini
-// Enhanced analyze files function - replace the existing analyzeFiles function with this
-// Enhanced analyze files function - replace the existing analyzeFiles function with this
-async function analyzeFiles(files) {
+// Enhanced repository analysis
+async function analyzeRepository(files, repoData) {
   const analysis = {
-    totalFiles: files.length,
     languages: new Set(),
-    frameworks: new Set(),
-    libraries: new Set(),
-    hasTests: false,
-    hasDocker: false,
-    hasCICD: false,
-    hasReadme: false,
-    configFiles: [],
-    mainFiles: [],
+    technologies: new Set(),
+    features: new Set(),
     projectType: 'Unknown',
-    dependencies: new Set(),
-    detectedTechnologies: new Set()
+    frameworks: new Set(),
+    totalFiles: files.length
   };
 
-  // Configuration file contents to analyze
-  let requirementsTxt = '';
-  let setupPy = '';
-  let packageJson = '';
-  let pyprojectToml = '';
+  // Language detection with extension mapping
+  const languageMap = {
+    'js': 'JavaScript', 'jsx': 'JavaScript', 'ts': 'TypeScript', 'tsx': 'TypeScript',
+    'py': 'Python', 'java': 'Java', 'cpp': 'C++', 'c': 'C', 'cs': 'C#',
+    'rb': 'Ruby', 'php': 'PHP', 'go': 'Go', 'rs': 'Rust', 'swift': 'Swift',
+    'kt': 'Kotlin', 'scala': 'Scala', 'r': 'R', 'jl': 'Julia', 'sh': 'Shell',
+    'vue': 'Vue.js', 'svelte': 'Svelte', 'dart': 'Dart', 'html': 'HTML',
+    'css': 'CSS', 'scss': 'SCSS', 'less': 'LESS', 'sql': 'SQL'
+  };
 
-  // First pass - filename analysis and identify key files
+  // Technology detection patterns
+  const techPatterns = {
+    // Frontend Frameworks
+    'React': ['package.json', /react/i, 'jsx', 'tsx', /component/i],
+    'Vue.js': ['package.json', /vue/i, 'vue'],
+    'Angular': ['package.json', /angular/i, 'angular.json'],
+    'Svelte': ['package.json', /svelte/i, 'svelte'],
+    'Next.js': ['package.json', /next/i, 'next.config'],
+    'Nuxt.js': ['package.json', /nuxt/i, 'nuxt.config'],
+    
+    // Backend Frameworks
+    'Node.js': ['package.json', 'server.js', 'app.js', 'index.js'],
+    'Express.js': ['package.json', /express/i],
+    'Django': ['manage.py', 'settings.py', /django/i],
+    'Flask': ['app.py', /flask/i],
+    'FastAPI': [/fastapi/i, /uvicorn/i],
+    'Spring Boot': ['pom.xml', /spring/i],
+    'Ruby on Rails': ['Gemfile', /rails/i],
+    
+    // Mobile
+    'React Native': ['package.json', /react-native/i],
+    'Flutter': ['pubspec.yaml', /flutter/i],
+    'Ionic': ['package.json', /ionic/i],
+    
+    // Database & Storage
+    'MongoDB': [/mongo/i, 'mongoose'],
+    'PostgreSQL': [/postgres/i, /pg/i],
+    'MySQL': [/mysql/i],
+    'Redis': [/redis/i],
+    'Firebase': [/firebase/i],
+    'Supabase': [/supabase/i],
+    
+    // Cloud & DevOps
+    'Docker': ['Dockerfile', 'docker-compose.yml'],
+    'Kubernetes': [/k8s/i, /kubernetes/i, '.yaml'],
+    'AWS': [/aws/i, /lambda/i, /s3/i],
+    'Google Cloud': [/gcp/i, /google-cloud/i],
+    'Azure': [/azure/i],
+    
+    // ML/Data Science
+    'TensorFlow': [/tensorflow/i, /tf/i],
+    'PyTorch': [/torch/i, /pytorch/i],
+    'Scikit-Learn': [/sklearn/i, /scikit-learn/i],
+    'Pandas': [/pandas/i],
+    'NumPy': [/numpy/i],
+    'Jupyter': ['.ipynb', /jupyter/i],
+    'Streamlit': [/streamlit/i],
+    
+    // Testing
+    'Jest': [/jest/i],
+    'Pytest': [/pytest/i],
+    'Cypress': [/cypress/i],
+    'Selenium': [/selenium/i],
+    
+    // Build Tools
+    'Webpack': [/webpack/i],
+    'Vite': [/vite/i, 'vite.config'],
+    'Rollup': [/rollup/i],
+    'Parcel': [/parcel/i],
+    
+    // CSS Frameworks
+    'Tailwind CSS': [/tailwind/i],
+    'Bootstrap': [/bootstrap/i],
+    'Material-UI': [/mui/i, /material-ui/i],
+    'Chakra UI': [/chakra/i],
+    
+    // State Management
+    'Redux': [/redux/i],
+    'MobX': [/mobx/i],
+    'Zustand': [/zustand/i],
+    'Pinia': [/pinia/i],
+  };
+
+  // Feature detection patterns
+  const featurePatterns = {
+    'Authentication': [/auth/i, /login/i, /jwt/i, /oauth/i, /passport/i],
+    'API Integration': [/api/i, /fetch/i, /axios/i, /request/i],
+    'Database Integration': [/db/i, /database/i, /model/i, /schema/i],
+    'Real-time Features': [/socket/i, /websocket/i, /realtime/i],
+    'File Upload': [/upload/i, /multer/i, /file/i],
+    'Payment Processing': [/stripe/i, /paypal/i, /payment/i],
+    'Email Services': [/mail/i, /email/i, /smtp/i],
+    'Caching': [/cache/i, /redis/i, /memcached/i],
+    'Testing Suite': [/test/i, /spec/i, /__tests__/i],
+    'CI/CD Pipeline': [/ci/i, /cd/i, /github\/workflows/i, '.travis.yml'],
+    'Containerization': ['Dockerfile', /docker/i],
+    'Monitoring': [/monitor/i, /analytics/i, /logging/i],
+    'Progressive Web App': [/pwa/i, /manifest/i, /service-worker/i],
+    'Mobile Responsive': [/responsive/i, /mobile/i, /breakpoint/i],
+    'SEO Optimization': [/seo/i, /meta/i, /sitemap/i],
+    'Internationalization': [/i18n/i, /locale/i, /translation/i],
+    'Dark Mode': [/dark/i, /theme/i, /mode/i],
+    'Data Visualization': [/chart/i, /graph/i, /d3/i, /plotly/i],
+    'Machine Learning': [/ml/i, /model/i, /predict/i, /train/i],
+    'Data Processing': [/etl/i, /pipeline/i, /processor/i],
+    'Microservices': [/microservice/i, /service/i, /gateway/i],
+    'GraphQL': [/graphql/i, /apollo/i],
+    'WebSocket': [/websocket/i, /ws/i, /socket/i],
+    'Background Jobs': [/job/i, /queue/i, /worker/i, /celery/i],
+    'Search Functionality': [/search/i, /elastic/i, /solr/i],
+    'Content Management': [/cms/i, /admin/i, /dashboard/i]
+  };
+
+  // Analyze files
+  const fileContents = new Map();
+  
+  // Get file extensions and names
   files.forEach(file => {
+    const ext = file.name.split('.').pop()?.toLowerCase();
     const name = file.name.toLowerCase();
-    const ext = name.split('.').pop();
+    const path = file.path?.toLowerCase() || '';
     
-    // Language detection
-    const langMap = {
-      'js': 'JavaScript', 'ts': 'TypeScript', 'py': 'Python', 'java': 'Java',
-      'cpp': 'C++', 'c': 'C', 'rb': 'Ruby', 'php': 'PHP', 'go': 'Go',
-      'rs': 'Rust', 'swift': 'Swift', 'kt': 'Kotlin', 'scala': 'Scala',
-      'r': 'R', 'jl': 'Julia', 'sh': 'Shell', 'yml': 'YAML', 'yaml': 'YAML'
-    };
-    if (langMap[ext]) analysis.languages.add(langMap[ext]);
-
-    // Framework/Technology detection from filenames
-    if (name === 'package.json') {
-      analysis.frameworks.add('Node.js');
-      analysis.configFiles.push(file.name);
+    // Add language
+    if (ext && languageMap[ext]) {
+      analysis.languages.add(languageMap[ext]);
     }
-    if (name === 'requirements.txt' || name === 'setup.py' || name === 'pyproject.toml') {
-      analysis.frameworks.add('Python');
-      analysis.configFiles.push(file.name);
-    }
-    if (name === 'pom.xml' || name === 'build.gradle') {
-      analysis.frameworks.add('Java');
-      analysis.configFiles.push(file.name);
-    }
-    if (name === 'cargo.toml') {
-      analysis.frameworks.add('Rust');
-      analysis.configFiles.push(file.name);
-    }
-    if (name === 'go.mod') {
-      analysis.frameworks.add('Go');
-      analysis.configFiles.push(file.name);
-    }
-
-    // Special files detection
-    if (name.includes('test') || name.includes('spec')) analysis.hasTests = true;
-    if (name === 'dockerfile' || name === 'docker-compose.yml') analysis.hasDocker = true;
-    if (name.includes('ci') || name.includes('workflow') || name === '.travis.yml' || name === '.github') analysis.hasCICD = true;
-    if (name === 'readme.md') analysis.hasReadme = true;
-
-    // Main files
-    if (['index.js', 'main.py', 'app.js', 'server.js', 'main.go', '__init__.py'].includes(name)) {
-      analysis.mainFiles.push(file.name);
-    }
-
-    // Python-specific detection
-    if (ext === 'py') {
-      // Detect common Python ML/DS patterns from filenames
-      if (name.includes('model') || name.includes('train') || name.includes('predict')) {
-        analysis.detectedTechnologies.add('Machine Learning');
+    
+    // Check technologies
+    Object.entries(techPatterns).forEach(([tech, patterns]) => {
+      if (patterns.some(pattern => {
+        if (typeof pattern === 'string') {
+          return name === pattern.toLowerCase() || name.includes(pattern.toLowerCase());
+        }
+        if (pattern instanceof RegExp) {
+          return pattern.test(name) || pattern.test(path);
+        }
+        return false;
+      })) {
+        analysis.technologies.add(tech);
       }
-      if (name.includes('data') || name.includes('preprocess')) {
-        analysis.detectedTechnologies.add('Data Processing');
+    });
+    
+    // Check features
+    Object.entries(featurePatterns).forEach(([feature, patterns]) => {
+      if (patterns.some(pattern => {
+        if (typeof pattern === 'string') {
+          return name === pattern.toLowerCase() || name.includes(pattern.toLowerCase()) || path.includes(pattern.toLowerCase());
+        }
+        if (pattern instanceof RegExp) {
+          return pattern.test(name) || pattern.test(path) || pattern.test(file.path || '');
+        }
+        return false;
+      })) {
+        analysis.features.add(feature);
       }
-    }
-
-    // JavaScript/TypeScript specific detection
-    if (ext === 'js' || ext === 'ts') {
-      if (name.includes('component') || name.includes('hook')) {
-        analysis.detectedTechnologies.add('React');
-      }
-      if (name.includes('test') || name.includes('spec')) {
-        analysis.detectedTechnologies.add('Testing');
-      }
-    }
+    });
   });
 
-  // Try to fetch and analyze key configuration files
-  try {
-    // Analyze Python dependencies
-    const requirementsFile = files.find(f => f.name.toLowerCase() === 'requirements.txt');
-    const setupFile = files.find(f => f.name.toLowerCase() === 'setup.py');
-    const pyprojectFile = files.find(f => f.name.toLowerCase() === 'pyproject.toml');
-
-    if (requirementsFile && requirementsFile.download_url) {
+  // Analyze configuration files content
+  const configFiles = ['package.json', 'requirements.txt', 'setup.py', 'pom.xml', 'Cargo.toml'];
+  for (const file of files) {
+    if (configFiles.includes(file.name) && file.download_url) {
       try {
-        const response = await fetch(requirementsFile.download_url);
+        const response = await fetch(file.download_url);
         if (response.ok) {
-          requirementsTxt = await response.text();
-          analyzePythonDependencies(requirementsTxt, analysis);
+          const content = await response.text();
+          fileContents.set(file.name, content);
+          await analyzeConfigContent(file.name, content, analysis);
         }
       } catch (error) {
-        console.log('Could not fetch requirements.txt:', error.message);
+        console.log(`Could not fetch ${file.name}:`, error.message);
       }
     }
-
-    if (setupFile && setupFile.download_url) {
-      try {
-        const response = await fetch(setupFile.download_url);
-        if (response.ok) {
-          setupPy = await response.text();
-          analyzeSetupPy(setupPy, analysis);
-        }
-      } catch (error) {
-        console.log('Could not fetch setup.py:', error.message);
-      }
-    }
-
-    // Analyze package.json for Node.js projects
-    const packageFile = files.find(f => f.name.toLowerCase() === 'package.json');
-    if (packageFile && packageFile.download_url) {
-      try {
-        const response = await fetch(packageFile.download_url);
-        if (response.ok) {
-          packageJson = await response.text();
-          analyzePackageJson(packageJson, analysis);
-        }
-      } catch (error) {
-        console.log('Could not fetch package.json:', error.message);
-      }
-    }
-
-  } catch (error) {
-    console.log('Error analyzing configuration files:', error.message);
   }
 
-  // Determine project type based on detected technologies and dependencies
-  determineProjectType(analysis);
+  // Add repo language if available
+  if (repoData.language) {
+    analysis.languages.add(repoData.language);
+  }
 
-  return formatAnalysisOutput(analysis);
-}
+  // Determine project type
+  analysis.projectType = determineProjectType(analysis);
 
-function analyzePythonDependencies(content, analysis) {
-  const lines = content.split('\n');
-  const commonLibraries = {
-    'numpy': 'NumPy',
-    'pandas': 'Pandas', 
-    'scikit-learn': 'Scikit-Learn',
-    'sklearn': 'Scikit-Learn',
-    'tensorflow': 'TensorFlow',
-    'torch': 'PyTorch',
-    'pytorch': 'PyTorch',
-    'matplotlib': 'Matplotlib',
-    'seaborn': 'Seaborn',
-    'flask': 'Flask',
-    'django': 'Django',
-    'fastapi': 'FastAPI',
-    'requests': 'Requests',
-    'pytest': 'Pytest',
-    'opencv': 'OpenCV',
-    'cv2': 'OpenCV',
-    'scipy': 'SciPy',
-    'jupyter': 'Jupyter',
-    'notebook': 'Jupyter Notebook',
-    'streamlit': 'Streamlit',
-    'plotly': 'Plotly',
-    'sqlalchemy': 'SQLAlchemy',
-    'celery': 'Celery',
-    'redis': 'Redis',
-    'nltk': 'NLTK',
-    'spacy': 'spaCy',
-    'keras': 'Keras'
+  return {
+    languages: Array.from(analysis.languages).slice(0, 5), // Top 5 languages
+    technologies: Array.from(analysis.technologies).slice(0, 7), // Top 7 technologies
+    features: Array.from(analysis.features).slice(0, 10), // Top 10 features
+    projectType: analysis.projectType,
+    totalFiles: analysis.totalFiles,
+    hasTests: analysis.features.has('Testing Suite'),
+    hasDocker: analysis.technologies.has('Docker'),
+    hasCICD: analysis.features.has('CI/CD Pipeline')
   };
-
-  lines.forEach(line => {
-    const cleanLine = line.toLowerCase().trim().split(/[>=<]/)[0].trim();
-    if (commonLibraries[cleanLine]) {
-      analysis.libraries.add(commonLibraries[cleanLine]);
-      analysis.dependencies.add(cleanLine);
-    }
-    
-    // Check for ML/DS indicators
-    if (cleanLine.includes('scikit') || cleanLine.includes('sklearn') || cleanLine.includes('tensorflow') || cleanLine.includes('torch')) {
-      analysis.detectedTechnologies.add('Machine Learning');
-    }
-    if (cleanLine.includes('pandas') || cleanLine.includes('numpy')) {
-      analysis.detectedTechnologies.add('Data Science');
-    }
-    if (cleanLine.includes('flask') || cleanLine.includes('django') || cleanLine.includes('fastapi')) {
-      analysis.detectedTechnologies.add('Web Framework');
-    }
-  });
 }
 
-function analyzeSetupPy(content, analysis) {
-  // Extract dependencies from setup.py
-  const installRequiresMatch = content.match(/install_requires\s*=\s*\[(.*?)\]/s);
-  if (installRequiresMatch) {
-    const deps = installRequiresMatch[1].replace(/['"]/g, '').split(',');
-    deps.forEach(dep => {
-      const cleanDep = dep.trim().toLowerCase().split(/[>=<]/)[0].trim();
-      analysis.dependencies.add(cleanDep);
+async function analyzeConfigContent(filename, content, analysis) {
+  if (filename === 'package.json') {
+    try {
+      const pkg = JSON.parse(content);
+      const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
       
-      // Check for common libraries
-      if (cleanDep.includes('scikit') || cleanDep.includes('sklearn')) {
-        analysis.libraries.add('Scikit-Learn');
-        analysis.detectedTechnologies.add('Machine Learning');
+      Object.keys(allDeps).forEach(dep => {
+        // React ecosystem
+        if (dep.includes('react') && !dep.includes('native')) analysis.technologies.add('React');
+        if (dep.includes('react-native')) analysis.technologies.add('React Native');
+        if (dep.includes('next')) analysis.technologies.add('Next.js');
+        if (dep.includes('vue')) analysis.technologies.add('Vue.js');
+        if (dep.includes('nuxt')) analysis.technologies.add('Nuxt.js');
+        if (dep.includes('angular')) analysis.technologies.add('Angular');
+        if (dep.includes('svelte')) analysis.technologies.add('Svelte');
+        
+        // Backend
+        if (dep.includes('express')) analysis.technologies.add('Express.js');
+        if (dep.includes('fastify')) analysis.technologies.add('Fastify');
+        if (dep.includes('koa')) analysis.technologies.add('Koa.js');
+        
+        // Databases
+        if (dep.includes('mongoose') || dep.includes('mongodb')) analysis.technologies.add('MongoDB');
+        if (dep.includes('pg') || dep.includes('postgres')) analysis.technologies.add('PostgreSQL');
+        if (dep.includes('mysql')) analysis.technologies.add('MySQL');
+        if (dep.includes('redis')) analysis.technologies.add('Redis');
+        
+        // CSS Frameworks
+        if (dep.includes('tailwind')) analysis.technologies.add('Tailwind CSS');
+        if (dep.includes('bootstrap')) analysis.technologies.add('Bootstrap');
+        if (dep.includes('@mui') || dep.includes('material-ui')) analysis.technologies.add('Material-UI');
+        
+        // Testing
+        if (dep.includes('jest')) analysis.technologies.add('Jest');
+        if (dep.includes('cypress')) analysis.technologies.add('Cypress');
+        if (dep.includes('playwright')) analysis.technologies.add('Playwright');
+        
+        // Build tools
+        if (dep.includes('webpack')) analysis.technologies.add('Webpack');
+        if (dep.includes('vite')) analysis.technologies.add('Vite');
+        
+        // Features based on dependencies
+        if (dep.includes('auth') || dep.includes('jwt') || dep.includes('passport')) {
+          analysis.features.add('Authentication');
+        }
+        if (dep.includes('socket')) analysis.features.add('Real-time Features');
+        if (dep.includes('multer') || dep.includes('upload')) analysis.features.add('File Upload');
+        if (dep.includes('stripe') || dep.includes('paypal')) analysis.features.add('Payment Processing');
+      });
+      
+      // Check scripts for additional insights
+      if (pkg.scripts) {
+        Object.values(pkg.scripts).forEach(script => {
+          if (typeof script === 'string') {
+            if (script.includes('test')) analysis.features.add('Testing Suite');
+            if (script.includes('docker')) analysis.features.add('Containerization');
+            if (script.includes('build')) analysis.features.add('Build Pipeline');
+          }
+        });
       }
-      if (cleanDep.includes('numpy')) {
-        analysis.libraries.add('NumPy');
-      }
-      if (cleanDep.includes('pandas')) {
-        analysis.libraries.add('Pandas');
-        analysis.detectedTechnologies.add('Data Science');
-      }
-    });
-  }
-
-  // Extract project description/name for type detection
-  const nameMatch = content.match(/name\s*=\s*['"](.*?)['"]/);
-  if (nameMatch) {
-    const projectName = nameMatch[1].toLowerCase();
-    if (projectName.includes('ml') || projectName.includes('learn') || projectName.includes('model')) {
-      analysis.detectedTechnologies.add('Machine Learning');
+    } catch (error) {
+      console.log('Error parsing package.json:', error.message);
     }
   }
-}
-
-function analyzePackageJson(content, analysis) {
-  try {
-    const pkg = JSON.parse(content);
-    const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
-    
-    Object.keys(allDeps).forEach(dep => {
-      const depName = dep.toLowerCase();
+  
+  if (filename === 'requirements.txt') {
+    const lines = content.split('\n');
+    lines.forEach(line => {
+      const dep = line.toLowerCase().trim().split(/[>=<]/)[0];
+      if (dep.includes('django')) analysis.technologies.add('Django');
+      if (dep.includes('flask')) analysis.technologies.add('Flask');
+      if (dep.includes('fastapi')) analysis.technologies.add('FastAPI');
+      if (dep.includes('tensorflow')) analysis.technologies.add('TensorFlow');
+      if (dep.includes('torch') || dep.includes('pytorch')) analysis.technologies.add('PyTorch');
+      if (dep.includes('pandas')) analysis.technologies.add('Pandas');
+      if (dep.includes('numpy')) analysis.technologies.add('NumPy');
+      if (dep.includes('sklearn') || dep.includes('scikit-learn')) analysis.technologies.add('Scikit-Learn');
+      if (dep.includes('streamlit')) analysis.technologies.add('Streamlit');
+      if (dep.includes('jupyter')) analysis.features.add('Jupyter Notebooks');
       
-      // React ecosystem
-      if (depName.includes('react')) {
-        analysis.libraries.add('React');
-        analysis.detectedTechnologies.add('Frontend Framework');
+      // ML/DS features
+      if (dep.includes('tensorflow') || dep.includes('torch') || dep.includes('sklearn')) {
+        analysis.features.add('Machine Learning');
       }
-      if (depName.includes('vue')) {
-        analysis.libraries.add('Vue.js');
-        analysis.detectedTechnologies.add('Frontend Framework');
-      }
-      if (depName.includes('angular')) {
-        analysis.libraries.add('Angular');
-        analysis.detectedTechnologies.add('Frontend Framework');
-      }
-      
-      // Backend
-      if (depName.includes('express')) {
-        analysis.libraries.add('Express.js');
-        analysis.detectedTechnologies.add('Web Framework');
-      }
-      if (depName.includes('next')) {
-        analysis.libraries.add('Next.js');
-        analysis.detectedTechnologies.add('Full-Stack Framework');
-      }
-      
-      // Testing
-      if (depName.includes('jest') || depName.includes('mocha') || depName.includes('chai')) {
-        analysis.detectedTechnologies.add('Testing');
+      if (dep.includes('pandas') || dep.includes('numpy')) {
+        analysis.features.add('Data Processing');
       }
     });
-  } catch (error) {
-    console.log('Error parsing package.json:', error.message);
   }
 }
 
 function determineProjectType(analysis) {
-  const techs = Array.from(analysis.detectedTechnologies);
-  const libs = Array.from(analysis.libraries);
+  const techs = Array.from(analysis.technologies);
+  const features = Array.from(analysis.features);
+  const languages = Array.from(analysis.languages);
   
-  if (libs.some(lib => ['Scikit-Learn', 'TensorFlow', 'PyTorch'].includes(lib))) {
-    analysis.projectType = 'Machine Learning Library';
-  } else if (techs.includes('Machine Learning')) {
-    analysis.projectType = 'Machine Learning Project';
-  } else if (techs.includes('Data Science') || libs.includes('Pandas')) {
-    analysis.projectType = 'Data Science Project';
-  } else if (techs.includes('Web Framework')) {
-    analysis.projectType = 'Web Application';
-  } else if (techs.includes('Frontend Framework')) {
-    analysis.projectType = 'Frontend Application';
-  } else if (analysis.languages.has('Python')) {
-    analysis.projectType = 'Python Project';
-  } else if (analysis.languages.has('JavaScript')) {
-    analysis.projectType = 'JavaScript Project';
+  if (techs.some(t => ['TensorFlow', 'PyTorch', 'Scikit-Learn'].includes(t))) {
+    return 'Machine Learning Project';
   }
+  if (techs.some(t => ['React Native', 'Flutter', 'Ionic'].includes(t))) {
+    return 'Mobile Application';
+  }
+  if (techs.some(t => ['React', 'Vue.js', 'Angular', 'Svelte'].includes(t))) {
+    return 'Frontend Application';
+  }
+  if (techs.some(t => ['Next.js', 'Nuxt.js'].includes(t))) {
+    return 'Full-Stack Application';
+  }
+  if (techs.some(t => ['Express.js', 'Django', 'Flask', 'FastAPI'].includes(t))) {
+    return 'Backend API';
+  }
+  if (techs.includes('Docker') && features.includes('Microservices')) {
+    return 'Microservices Architecture';
+  }
+  if (features.includes('Data Processing') || techs.includes('Pandas')) {
+    return 'Data Science Project';
+  }
+  if (languages.includes('Python')) return 'Python Application';
+  if (languages.includes('JavaScript') || languages.includes('TypeScript')) return 'JavaScript Application';
+  
+  return 'Software Project';
 }
 
-function formatAnalysisOutput(analysis) {
-  // Combine technologies for display
-  const allTechnologies = new Set([
-    ...Array.from(analysis.languages),
-    ...Array.from(analysis.frameworks),
-    ...Array.from(analysis.libraries),
-    ...Array.from(analysis.detectedTechnologies)
-  ]);
-
-  return `
-- Total files: ${analysis.totalFiles}
-- Project Type: ${analysis.projectType}
-- Languages: ${Array.from(analysis.languages).join(', ') || 'Unknown'}
-- Technologies: ${Array.from(allTechnologies).join(', ') || 'None detected'}
-- Key Libraries: ${Array.from(analysis.libraries).join(', ') || 'None detected'}
-- Has tests: ${analysis.hasTests ? 'Yes' : 'No'}
-- Has Docker: ${analysis.hasDocker ? 'Yes' : 'No'}
-- Has CI/CD: ${analysis.hasCICD ? 'Yes' : 'No'}
-- Config files: ${analysis.configFiles.join(', ') || 'None'}
-- Main files: ${analysis.mainFiles.join(', ') || 'None'}
-- Key files found: ${files.slice(0, 10).map(f => f.name).join(', ')}
-- Dependencies detected: ${analysis.dependencies.size} packages`;
-}
-
-// Debug function to check GitHub API status
-async function checkGitHubRateLimit() {
-  const headers = { 
-    "User-Agent": "readme-generator-debug",
-    "Accept": "application/vnd.github.v3+json"
-  };
-  
-  if (process.env.GITHUB_TOKEN) {
-    headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
-  }
-
-  try {
-    const res = await fetch(`${GITHUB_API}/rate_limit`, { headers });
-    const data = await res.json();
-    
-    console.log('\n🔍 GitHub API Rate Limit Status:');
-    console.log(`- Core API: ${data.resources.core.remaining}/${data.resources.core.limit} remaining`);
-    console.log(`- Reset time: ${new Date(data.resources.core.reset * 1000).toLocaleTimeString()}`);
-    console.log(`- Authentication: ${process.env.GITHUB_TOKEN ? '✅ Using token' : '❌ Unauthenticated'}\n`);
-    
-    return data;
-  } catch (error) {
-    console.error('❌ Failed to check rate limit:', error.message);
-    return null;
-  }
-}
-
-// Fetch repository files
-async function fetchRepoFiles(owner, repo, path = "", depth = 0) {
-  if (depth > 2) return []; // Limit depth to prevent too many requests
-  
-  const url = `${GITHUB_API}/repos/${owner}/${repo}/contents/${path}`;
-  const headers = { 
-    "User-Agent": "readme-generator",
-    "Accept": "application/vnd.github.v3+json"
-  };
-  
-  if (process.env.GITHUB_TOKEN) {
-    headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
-  }
-
-  try {
-    const res = await fetch(url, { headers, timeout: 10000 });
-    
-    if (!res.ok) {
-      if (res.status === 403) {
-        const rateLimitReset = res.headers.get('x-ratelimit-reset');
-        const resetTime = new Date(parseInt(rateLimitReset) * 1000);
-        throw new Error(`Rate limit exceeded. Resets at: ${resetTime.toLocaleTimeString()}`);
-      } else if (res.status === 404) {
-        throw new Error("Repository not found or path doesn't exist");
-      }
-      const errorText = await res.text();
-      throw new Error(`GitHub API error: ${res.status} - ${errorText}`);
-    }
-    
-    const items = await res.json();
-    if (!Array.isArray(items)) return [];
-    
-    let files = [];
-    for (const item of items.slice(0, 30)) { // Limit items
-      if (item.type === "file") {
-        files.push({
-          name: item.name,
-          path: item.path,
-          size: item.size || 0,
-          download_url: item.download_url
-        });
-      } else if (item.type === "dir" && depth < 1) {
-        // Only go one level deep for now
-        const subFiles = await fetchRepoFiles(owner, repo, item.path, depth + 1);
-        files = files.concat(subFiles);
-      }
-    }
-    
-    return files;
-    
-  } catch (error) {
-    console.error(`❌ Error fetching files from ${path}:`, error.message);
-    if (depth === 0) throw error;
-    return [];
-  }
-}
-
-// Parse GitHub URL
-function parseGitHubUrl(url) {
+// Utility functions
+const parseGitHubUrl = (url) => {
   const patterns = [
     /github\.com\/([^\/]+)\/([^\/]+?)(?:\.git)?(?:\/.*)?$/,
     /^([^\/\s]+)\/([^\/\s]+)$/
@@ -578,152 +362,185 @@ function parseGitHubUrl(url) {
   
   for (const pattern of patterns) {
     const match = url.trim().match(pattern);
-    if (match) {
-      return { owner: match[1], repo: match[2] };
-    }
+    if (match) return { owner: match[1], repo: match[2] };
   }
   return null;
-}
+};
 
-// Test endpoint for Gemini API
+const makeRequest = async (url, options = {}) => {
+  const headers = { 
+    "User-Agent": "readme-generator",
+    "Accept": "application/vnd.github.v3+json",
+    ...options.headers
+  };
+  
+  if (process.env.GITHUB_TOKEN) {
+    headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  }
+  
+  const response = await fetch(url, { ...options, headers });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  }
+  return response.json();
+};
+
+const fetchRepoFiles = async (owner, repo, path = "", depth = 0) => {
+  if (depth > 2) return [];
+  
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/contents/${path}`;
+  
+  try {
+    const items = await makeRequest(url);
+    if (!Array.isArray(items)) return [];
+    
+    let files = [];
+    for (const item of items.slice(0, 50)) {
+      if (item.type === "file") {
+        files.push({
+          name: item.name,
+          path: item.path,
+          size: item.size || 0,
+          download_url: item.download_url
+        });
+      } else if (item.type === "dir" && depth < 2) {
+        const subFiles = await fetchRepoFiles(owner, repo, item.path, depth + 1);
+        files = files.concat(subFiles);
+      }
+    }
+    return files;
+  } catch (error) {
+    console.error(`Error fetching files from ${path}:`, error.message);
+    if (depth === 0) throw error;
+    return [];
+  }
+};
+
+const generateReadme = async (repoInfo, files, repoData) => {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error('Gemini API key not configured');
+  }
+
+  const analysis = await analyzeRepository(files, repoData);
+  
+  const prompt = `Generate a comprehensive README.md for this GitHub repository:
+
+**Repository:** ${repoData.full_name}
+**Description:** ${repoData.description || 'No description provided'}
+**Languages:** ${analysis.languages.join(', ')}
+**Technologies:** ${analysis.technologies.join(', ')}
+**Features:** ${analysis.features.join(', ')}
+**Project Type:** ${analysis.projectType}
+**Stars:** ${repoData.stargazers_count || 0}
+
+Create a professional README with these sections in order:
+1. **Title** (# format, bold and prominent)
+2. **Description** (comprehensive overview)
+3. **Features** (key functionality and capabilities)
+4. **Tech Stack** (technologies and frameworks used)
+5. **Installation** (setup instructions)
+6. **Usage** (how to use/run the project)
+7. **API Documentation** (if applicable)
+8. **Contributing** (contribution guidelines)
+9. **License** (license information)
+
+Make it engaging, professional, and include relevant badges. Return ONLY markdown content without code blocks.`;
+
+  const response = await fetch(`${GEMINI_API}?key=${process.env.GEMINI_API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 2048,
+      }
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gemini API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const readme = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  
+  if (!readme) {
+    throw new Error('No content generated by Gemini API');
+  }
+
+  return readme.replace(/^```(?:markdown)?\s*/i, '').replace(/```$/, '').trim();
+};
+
+// API Endpoints
+app.get("/", (req, res) => {
+  res.json({
+    message: "README Generator API v2.0",
+    endpoints: ["/health", "/test-gemini", "/generate-readme"],
+    model: "gemini-2.0-flash-exp"
+  });
+});
+
 app.get("/test-gemini", async (req, res) => {
   try {
-    console.log('\n' + '='.repeat(50));
-    console.log('🤖 Testing Gemini 2.0 Flash API Connection');
-    console.log('='.repeat(50));
-    console.log('Request received from:', req.get('origin') || req.get('referer') || 'unknown');
-    
-    const result = await testGeminiAPI();
-    
-    const response = {
-      success: result.success,
-      message: result.success ? "Gemini 2.0 Flash API is working!" : "Gemini API test failed",
-      model: "gemini-2.0-flash-exp",
-      response: result.response || null,
-      error: result.error || null,
-      hasApiKey: !!process.env.GEMINI_API_KEY,
-      timestamp: new Date().toISOString(),
-      server: 'render',
-      environment: process.env.NODE_ENV || 'development'
-    };
+    const response = await fetch(`${GEMINI_API}?key=${process.env.GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: "Hello! Respond with 'Gemini API working!'" }] }]
+      })
+    });
 
-    console.log('Sending response:', { success: response.success, hasApiKey: response.hasApiKey });
+    const data = await response.json();
+    const result = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
     
-    res.json(response);
-    
+    res.json({
+      success: response.ok,
+      model: "gemini-2.0-flash-exp",
+      response: result,
+      hasApiKey: !!process.env.GEMINI_API_KEY
+    });
   } catch (error) {
-    console.error('Test endpoint error:', error.message);
     res.status(500).json({
       success: false,
-      message: "Test failed",
-      error: error.message,
-      timestamp: new Date().toISOString()
+      error: error.message
     });
   }
 });
 
-// Enhanced main endpoint with Gemini integration
 app.post("/generate-readme", async (req, res) => {
   try {
-    console.log('\n' + '='.repeat(50));
-    console.log('🚀 README Generation Started (Gemini 2.0 Flash)');
-    console.log('='.repeat(50));
-    
     const { repoUrl } = req.body;
-    
     if (!repoUrl) {
       return res.status(400).json({ error: "Repository URL is required" });
     }
 
-    // Check rate limit before starting
-    const rateLimitInfo = await checkGitHubRateLimit();
-    if (rateLimitInfo && rateLimitInfo.resources.core.remaining < 5) {
-      const resetTime = new Date(rateLimitInfo.resources.core.reset * 1000);
-      return res.status(429).json({ 
-        error: `Rate limit nearly exceeded. Try again after ${resetTime.toLocaleTimeString()}` 
-      });
-    }
-
-    // Parse GitHub URL
     const repoInfo = parseGitHubUrl(repoUrl);
     if (!repoInfo) {
-      return res.status(400).json({ 
-        error: "Invalid GitHub URL format. Use: https://github.com/owner/repository" 
-      });
+      return res.status(400).json({ error: "Invalid GitHub URL format" });
     }
 
-    // Get repository data
-    console.log(`\n📡 Fetching repository: ${repoInfo.owner}/${repoInfo.repo}`);
-    const repoResponse = await fetch(`${GITHUB_API}/repos/${repoInfo.owner}/${repoInfo.repo}`, {
-      headers: {
-        "User-Agent": "readme-generator",
-        "Accept": "application/vnd.github.v3+json",
-        ...(process.env.GITHUB_TOKEN && { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` })
-      }
-    });
+    // Get repo data and files
+    const [repoData, files] = await Promise.all([
+      makeRequest(`${GITHUB_API}/repos/${repoInfo.owner}/${repoInfo.repo}`),
+      fetchRepoFiles(repoInfo.owner, repoInfo.repo)
+    ]);
 
-    if (!repoResponse.ok) {
-      if (repoResponse.status === 404) {
-        return res.status(404).json({ error: "Repository not found or is private" });
-      }
-      throw new Error(`GitHub API error: ${repoResponse.status}`);
-    }
-
-    const repoData = await repoResponse.json();
-    console.log(`✅ Repository found: ${repoData.full_name}`);
-
-    // Fetch files
-    console.log('📁 Fetching repository files...');
-    const files = await fetchRepoFiles(repoInfo.owner, repoInfo.repo);
-    
     if (files.length === 0) {
       throw new Error("No accessible files found in repository");
     }
 
-    console.log(`📄 Found ${files.length} files`);
+    // Generate README and analysis
+    const [readme, analysis] = await Promise.all([
+      generateReadme(repoInfo, files, repoData),
+      analyzeRepository(files, repoData)
+    ]);
 
-    // Generate README with Gemini 2.0 Flash
-    console.log('🤖 Generating README with Gemini 2.0 Flash AI...');
-    const readme = await generateReadmeWithGemini(repoInfo, files, repoData);
-
-    // File analysis for response
-    const fileAnalysis = analyzeFiles(files);
-    const analysis = {
-      mainLanguage: repoData.language || Array.from(new Set(files.map(f => {
-        const ext = f.name.split('.').pop();
-        const langMap = { 'js': 'JavaScript', 'ts': 'TypeScript', 'py': 'Python' };
-        return langMap[ext];
-      }).filter(Boolean)))[0] || "Unknown",
-      languages: Array.from(new Set(files.map(f => {
-        const ext = f.name.split('.').pop();
-        const langMap = { 'js': 'JavaScript', 'ts': 'TypeScript', 'py': 'Python', 'java': 'Java' };
-        return langMap[ext];
-      }).filter(Boolean))),
-      totalFiles: files.length,
-      analyzedFiles: files.length,
-      hasTests: files.some(f => f.name.toLowerCase().includes('test')),
-      hasDocker: files.some(f => f.name.toLowerCase() === 'dockerfile'),
-      hasCICD: files.some(f => f.name.includes('ci') || f.name.includes('workflow'))
-    };
-
-    console.log('✅ Enhanced README generated successfully with deep analysis');
-    
     res.json({
       readme,
-      analysis: {
-        ...analysis,
-        deepAnalysis: {
-          projectType: 'Enhanced analysis completed',
-          tokensUsed: 'Up to 8192 tokens',
-          enhancedFeatures: [
-            'File content analysis',
-            'Dependency detection', 
-            'API endpoint discovery',
-            'Architecture insights',
-            'Deployment guidance'
-          ]
-        }
-      },
+      analysis,
       model: "gemini-2.0-flash-exp",
       repository: {
         name: repoData.full_name,
@@ -734,81 +551,30 @@ app.post("/generate-readme", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('\n❌ Generation failed:', error.message);
-    
-    if (error.message.includes('Rate limit')) {
-      res.status(429).json({ error: error.message });
-    } else if (error.message.includes('not found')) {
-      res.status(404).json({ error: "Repository not found or is private" });
-    } else if (error.message.includes('Gemini')) {
-      res.status(500).json({ error: `AI Generation failed: ${error.message}` });
-    } else {
-      res.status(500).json({ error: error.message });
-    }
+    console.error('Generation failed:', error.message);
+    const status = error.message.includes('not found') ? 404 : 
+                   error.message.includes('Rate limit') ? 429 : 500;
+    res.status(status).json({ error: error.message });
   }
 });
 
-// Health check with both GitHub and Gemini API tests
 app.get("/health", async (req, res) => {
-  try {
-    const [rateLimitInfo, geminiTest] = await Promise.all([
-      checkGitHubRateLimit(),
-      testGeminiAPI()
-    ]);
-    
-    res.json({
-      status: "healthy",
-      timestamp: new Date().toISOString(),
-      environment: {
-        hasGeminiKey: !!process.env.GEMINI_API_KEY,
-        hasGithubToken: !!process.env.GITHUB_TOKEN,
-        nodeVersion: process.version,
-        port: PORT,
-        nodeEnv: process.env.NODE_ENV
-      },
-      github: {
-        rateLimitRemaining: rateLimitInfo?.resources.core.remaining || 'unknown',
-        rateLimitTotal: rateLimitInfo?.resources.core.limit || 'unknown',
-        status: rateLimitInfo ? 'connected' : 'error'
-      },
-      gemini: {
-        model: "gemini-2.0-flash-exp",
-        status: geminiTest.success ? 'connected' : 'error',
-        error: geminiTest.error || null
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: "unhealthy",
-      error: error.message
-    });
-  }
-});
-
-// Add a simple root endpoint for testing
-app.get("/", (req, res) => {
   res.json({
-    message: "README Generator API",
-    version: "2.0",
-    endpoints: ["/health", "/test-gemini", "/generate-readme"],
-    timestamp: new Date().toISOString()
+    status: "healthy",
+    environment: {
+      hasGeminiKey: !!process.env.GEMINI_API_KEY,
+      hasGithubToken: !!process.env.GITHUB_TOKEN,
+      port: PORT
+    },
+    model: "gemini-2.0-flash-exp"
   });
 });
 
-app.listen(PORT, async () => {
-  console.log(`🚀 Enhanced Server running on http://localhost:${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
-  console.log(`🤖 Test Gemini 2.0 Flash: GET http://localhost:${PORT}/test-gemini`);
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🤖 Using Gemini 2.0 Flash model`);
   console.log(`🔑 GitHub Token: ${process.env.GITHUB_TOKEN ? '✅' : '❌'}`);
   console.log(`🔑 Gemini Key: ${process.env.GEMINI_API_KEY ? '✅' : '❌'}`);
-  console.log(`🔥 Using Gemini 2.0 Flash model`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  
-  // Test both APIs on startup
-  setTimeout(async () => {
-    await checkGitHubRateLimit();
-    await testGeminiAPI();
-  }, 1000);
 });
 
 export default app;
