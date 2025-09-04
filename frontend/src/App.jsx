@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Github, Download, Copy, RotateCcw, Play, Square, CheckCircle, XCircle, Loader, Code, FileText, Zap, Clock } from "lucide-react";
+import { Github, Download, Copy, RotateCcw, Play, Square, CheckCircle, XCircle, Loader, Code, FileText, Zap, Clock, Activity } from "lucide-react";
 
 const BACKEND_URL = "https://readme-666x.onrender.com";
-const WS_URL = BACKEND_URL.replace(/^https?/, 'ws');
 
 const renderMarkdown = (text) => {
   if (!text) return '';
@@ -11,7 +10,7 @@ const renderMarkdown = (text) => {
     .replace(/^### (.*$)/gm, '<h3 style="color: #06b6d4; margin: 1.5rem 0 0.5rem 0; font-size: 1.2rem; font-weight: 600;">$1</h3>')
     .replace(/^## (.*$)/gm, '<h2 style="color: #fff; margin: 2rem 0 1rem 0; font-size: 1.4rem; font-weight: 700;">$1</h2>')
     .replace(/^# (.*$)/gm, '<h1 style="color: #fff; margin: 2rem 0 1rem 0; font-size: 1.6rem; font-weight: 800;">$1</h1>')
-    .replace(/``````/g, '<pre style="background: #071127; padding: 1rem; border-radius: 0.5rem; overflow: auto; margin: 1rem 0; border: 1px solid rgba(255,255,255,0.1);"><code style="color: #dbeafe; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;">$2</code></pre>')
+    .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre style="background: #071127; padding: 1rem; border-radius: 0.5rem; overflow: auto; margin: 1rem 0; border: 1px solid rgba(255,255,255,0.1);"><code style="color: #dbeafe; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;">$2</code></pre>')
     .replace(/`([^`]+)`/g, '<code style="background: rgba(255,255,255,0.04); color: #06b6d4; padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;">$1</code>')
     .replace(/\*\*(.*?)\*\*/g, '<strong style="color: #fff; font-weight: 600;">$1</strong>')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color: #06b6d4; text-decoration: none; border-bottom: 1px dotted #06b6d4;">$1</a>')
@@ -37,72 +36,21 @@ export default function App() {
   const [analysis, setAnalysis] = useState(null);
   const [needsReset, setNeedsReset] = useState(false);
   const [displayedText, setDisplayedText] = useState("");
-  const [progress, setProgress] = useState({ step: '', message: '', progress: 0 });
+  const [progress, setProgress] = useState({ step: '', progress: 0, message: '', estimatedTime: 0 });
   const [error, setError] = useState("");
   const [geminiStatus, setGeminiStatus] = useState(null);
   const [testingGemini, setTestingGemini] = useState(false);
   const [abortController, setAbortController] = useState(null);
   const [typingInterval, setTypingInterval] = useState(null);
   const [copied, setCopied] = useState(false);
-  const [websocket, setWebsocket] = useState(null);
-  const [sessionId] = useState(() => Math.random().toString(36).substring(7));
-  const [estimatedTime, setEstimatedTime] = useState(null);
-  const [startTime, setStartTime] = useState(null);
-  
+  const [sessionId, setSessionId] = useState(null);
+  const [eventSource, setEventSource] = useState(null);
   const analysisRef = useRef(null);
   const previewRef = useRef(null);
 
   useEffect(() => {
     checkGeminiStatus();
-    return () => {
-      if (websocket) {
-        websocket.close();
-      }
-    };
   }, []);
-
-  const connectWebSocket = () => {
-    if (websocket) {
-      websocket.close();
-    }
-
-    const ws = new WebSocket(`${WS_URL}?sessionId=${sessionId}`);
-    
-    ws.onopen = () => {
-      console.log('WebSocket connected');
-      setWebsocket(ws);
-    };
-    
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'progress') {
-        const progressData = data.data;
-        setProgress(progressData);
-        
-        // Calculate estimated time
-        if (startTime && progressData.progress > 0) {
-          const elapsed = Date.now() - startTime;
-          const total = (elapsed / progressData.progress) * 100;
-          const remaining = total - elapsed;
-          setEstimatedTime(Math.max(0, Math.round(remaining / 1000)));
-        }
-        
-        if (progressData.error) {
-          setError(progressData.message);
-          setLoading(false);
-        }
-      }
-    };
-    
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
-      setWebsocket(null);
-    };
-    
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
-  };
 
   const checkGeminiStatus = async () => {
     try {
@@ -142,15 +90,50 @@ export default function App() {
       clearInterval(typingInterval);
       setTypingInterval(null);
     }
-    if (websocket) {
-      websocket.close();
+    if (eventSource) {
+      eventSource.close();
+      setEventSource(null);
     }
     setLoading(false);
-    setProgress({ step: '', message: '', progress: 0 });
+    setProgress({ step: '', progress: 0, message: '', estimatedTime: 0 });
     setAbortController(null);
-    setEstimatedTime(null);
-    setStartTime(null);
     setError("Generation stopped by user");
+  };
+
+  const generateSessionId = () => {
+    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  };
+
+  const connectToProgressStream = (sessionId) => {
+    const es = new EventSource(`${BACKEND_URL}/progress/${sessionId}`);
+    
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.step === 'error') {
+          setError(data.message);
+          setLoading(false);
+          es.close();
+        } else if (data.step === 'complete') {
+          setProgress(data);
+          setTimeout(() => {
+            setProgress({ step: '', progress: 0, message: '', estimatedTime: 0 });
+          }, 2000);
+        } else {
+          setProgress(data);
+        }
+      } catch (err) {
+        console.error('Error parsing progress data:', err);
+      }
+    };
+
+    es.onerror = (error) => {
+      console.error('EventSource failed:', error);
+      es.close();
+    };
+
+    setEventSource(es);
+    return es;
   };
 
   const generateReadme = async () => {
@@ -164,28 +147,28 @@ export default function App() {
       return;
     }
 
-    // Connect WebSocket first
-    connectWebSocket();
+    const newSessionId = generateSessionId();
+    setSessionId(newSessionId);
 
     const controller = new AbortController();
     setAbortController(controller);
-    setStartTime(Date.now());
-    setEstimatedTime(30); // Initial estimate
 
     setLoading(true);
     setDisplayedText("");
     setAnalysis(null);
     setError("");
-    setProgress({ step: 'starting', message: 'Starting README generation...', progress: 0 });
+    setProgress({ step: 'starting', progress: 0, message: 'Initializing...', estimatedTime: 60 });
+
+    // Connect to progress stream
+    const es = connectToProgressStream(newSessionId);
 
     try {
       const response = await fetch(`${BACKEND_URL}/generate-readme`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Session-Id": sessionId
         },
-        body: JSON.stringify({ repoUrl: repoUrl.trim() }),
+        body: JSON.stringify({ repoUrl: repoUrl.trim(), sessionId: newSessionId }),
         signal: controller.signal,
       });
 
@@ -199,7 +182,6 @@ export default function App() {
       setReadme(data.readme);
       setAnalysis(data.analysis);
       
-      // Scroll to analysis section
       requestAnimationFrame(() => {
         setTimeout(() => {
           if (analysisRef.current) {
@@ -213,7 +195,6 @@ export default function App() {
         }, 300);
       });
 
-      // Typing animation
       let i = 0;
       const interval = setInterval(() => {
         if (controller.signal.aborted) {
@@ -236,9 +217,7 @@ export default function App() {
         if (i >= data.readme.length) {
           clearInterval(interval);
           setTypingInterval(null);
-          setProgress({ step: 'completed', message: 'README generated successfully!', progress: 100 });
           setAbortController(null);
-          setEstimatedTime(null);
           
           requestAnimationFrame(() => {
             setTimeout(() => {
@@ -256,19 +235,20 @@ export default function App() {
     } catch (err) {
       if (err.name === 'AbortError') {
         console.log('Request was cancelled');
-        setProgress({ step: '', message: '', progress: 0 });
+        setProgress({ step: '', progress: 0, message: '', estimatedTime: 0 });
         setError("Generation cancelled by user");
       } else {
         console.error("Error generating README:", err);
         setError(err.message || "Failed to generate README. Please try again.");
       }
-      setProgress({ step: '', message: '', progress: 0 });
-      setEstimatedTime(null);
+      setProgress({ step: '', progress: 0, message: '', estimatedTime: 0 });
     } finally {
       if (!controller.signal.aborted) {
         setLoading(false);
         setAbortController(null);
-        setStartTime(null);
+      }
+      if (es) {
+        es.close();
       }
     }
   };
@@ -301,21 +281,21 @@ export default function App() {
       clearInterval(typingInterval);
       setTypingInterval(null);
     }
-    if (websocket) {
-      websocket.close();
+    if (eventSource) {
+      eventSource.close();
+      setEventSource(null);
     }
     
     setReadme("");
     setDisplayedText("");
     setAnalysis(null);
     setNeedsReset(false);
-    setProgress({ step: '', message: '', progress: 0 });
+    setProgress({ step: '', progress: 0, message: '', estimatedTime: 0 });
     setError("");
     setRepoUrl("");
     setLoading(false);
     setAbortController(null);
-    setEstimatedTime(null);
-    setStartTime(null);
+    setSessionId(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -358,33 +338,28 @@ export default function App() {
     transition: 'border-color 0.2s ease',
   };
 
+  const formatTime = (seconds) => {
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}m ${remainingSeconds}s`;
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #000 0%, #1a1a2e 50%, #16213e 100%)', padding: '28px 20px' }}>
       <style>{`
         @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes slideIn { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
-        @keyframes progressFill { from { width: 0%; } to { width: var(--progress); } }
+        @keyframes progressBar { 0% { width: 0%; } to { width: var(--progress); } }
         .fade-in { animation: fadeIn 0.6s ease-out; }
         .slide-in { animation: slideIn 0.5s ease-out; }
         .pulse { animation: pulse 2s infinite; }
+        .progress-bar { animation: progressBar 0.5s ease-out; }
         .status-success { background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
         .status-error { background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
         .status-loading { background: rgba(124, 58, 237, 0.1); color: #a855f7; border: 1px solid rgba(124, 58, 237, 0.3); }
         .card { background: rgba(255,255,255,0.02); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
-        .progress-bar {
-          background: rgba(255,255,255,0.1);
-          border-radius: 12px;
-          overflow: hidden;
-          height: 8px;
-          position: relative;
-        }
-        .progress-fill {
-          background: linear-gradient(90deg, #667eea, #764ba2);
-          height: 100%;
-          transition: width 0.3s ease;
-          border-radius: 12px;
-        }
         :root { --muted: #9ca3af; }
       `}</style>
 
@@ -541,63 +516,57 @@ export default function App() {
               </div>
             )}
 
-            {(progress.message || loading) && (
+            {progress.message && (
               <div style={{ 
                 padding: '20px', 
                 background: 'rgba(124, 58, 237, 0.1)', 
                 border: '1px solid rgba(124, 58, 237, 0.3)', 
-                borderRadius: '12px',
+                borderRadius: '16px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <Loader size={18} className="pulse" color="#a855f7" />
-                    <span style={{ color: '#a855f7', fontWeight: '500' }}>
-                      {progress.message || 'Processing...'}
-                    </span>
-                  </div>
-                  {estimatedTime && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#a855f7', fontSize: '14px' }}>
-                      <Clock size={16} />
-                      <span>{estimatedTime}s remaining</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {progress.step === 'fetching' && <Activity size={18} className="pulse" color="#a855f7" />}
+                      {progress.step === 'analyzing' && <Code size={18} className="pulse" color="#a855f7" />}
+                      {progress.step === 'generating' && <Loader size={18} className="pulse" color="#a855f7" />}
+                      {progress.step === 'complete' && <CheckCircle size={18} color="#10b981" />}
+                      <span style={{ color: '#a855f7', fontWeight: '600', fontSize: '16px' }}>{progress.message}</span>
                     </div>
-                  )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    {progress.estimatedTime > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Clock size={14} color="#a855f7" />
+                        <span style={{ color: '#a855f7', fontSize: '14px', fontWeight: '500' }}>
+                          ~{formatTime(progress.estimatedTime)}
+                        </span>
+                      </div>
+                    )}
+                    <span style={{ color: '#a855f7', fontWeight: '600', fontSize: '16px' }}>{progress.progress}%</span>
+                  </div>
                 </div>
                 
-                <div className="progress-bar">
+                {/* Progress Bar */}
+                <div style={{ 
+                  width: '100%', 
+                  height: '8px', 
+                  background: 'rgba(255,255,255,0.1)', 
+                  borderRadius: '4px',
+                  overflow: 'hidden'
+                }}>
                   <div 
-                    className="progress-fill" 
-                    style={{ width: `${progress.progress || 0}%` }}
+                    className="progress-bar"
+                    style={{ 
+                      height: '100%', 
+                      background: progress.step === 'complete' ? 
+                        'linear-gradient(90deg, #10b981 0%, #059669 100%)' :
+                        'linear-gradient(90deg, #a855f7 0%, #7c3aed 100%)',
+                      borderRadius: '4px',
+                      width: `${progress.progress}%`,
+                      transition: 'width 0.5s ease-out'
+                    }} 
                   />
                 </div>
-                
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
-                  <span style={{ color: '#a855f7', fontSize: '12px', fontWeight: '500' }}>
-                    {progress.step && progress.step.replace(/_/g, ' ').toUpperCase()}
-                  </span>
-                  <span style={{ color: '#a855f7', fontSize: '12px' }}>
-                    {Math.round(progress.progress || 0)}%
-                  </span>
-                </div>
-                
-                {loading && (
-                  <div style={{ textAlign: 'center', marginTop: '16px' }}>
-                    <button 
-                      onClick={stopGeneration} 
-                      style={{
-                        background: 'rgba(239, 68, 68, 0.8)',
-                        border: 'none',
-                        borderRadius: '6px',
-                        color: '#fff',
-                        padding: '6px 12px',
-                        fontSize: '12px',
-                        cursor: 'pointer',
-                        fontWeight: '600'
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )}
               </div>
             )}
 
@@ -636,7 +605,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Simplified Analysis Section - Only shows file count */}
+        {/* Simplified Analysis Section - Only show files processed */}
         {analysis && (
           <div ref={analysisRef} className="card slide-in" style={{ borderRadius: '20px', padding: '32px', marginBottom: '32px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
@@ -648,18 +617,18 @@ export default function App() {
               }}>
                 <FileText size={24} color="white" />
               </div>
-              <h3 style={{ fontSize: '24px', fontWeight: '700', color: '#fff', margin: 0 }}>Repository Summary</h3>
+              <h3 style={{ fontSize: '24px', fontWeight: '700', color: '#fff', margin: 0 }}>Repository Analysis Complete</h3>
             </div>
             
             <div style={{ 
               display: 'grid', 
-              gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', 
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
               gap: '20px' 
             }}>
               <div className="card" style={{ padding: '24px', borderRadius: '16px' }}>
                 <div style={{ 
                   width: '40px', height: '40px', 
-                  background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', 
+                  background: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)', 
                   borderRadius: '10px', 
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   marginBottom: '16px'
@@ -667,13 +636,13 @@ export default function App() {
                   <FileText size={20} color="white" />
                 </div>
                 <h4 style={{ fontSize: '14px', fontWeight: '500', color: 'var(--muted)', marginBottom: '8px', margin: 0 }}>
-                  Files Analyzed
+                  Files Processed
                 </h4>
-                <p style={{ fontSize: '16px', fontWeight: '600', color: '#fff', margin: 0, lineHeight: '1.4' }}>
-                  {analysis.totalFiles} files
+                <p style={{ fontSize: '24px', fontWeight: '700', color: '#fff', margin: 0 }}>
+                  {analysis.totalFiles}
                 </p>
               </div>
-              
+
               <div className="card" style={{ padding: '24px', borderRadius: '16px' }}>
                 <div style={{ 
                   width: '40px', height: '40px', 
@@ -687,8 +656,26 @@ export default function App() {
                 <h4 style={{ fontSize: '14px', fontWeight: '500', color: 'var(--muted)', marginBottom: '8px', margin: 0 }}>
                   Primary Language
                 </h4>
-                <p style={{ fontSize: '16px', fontWeight: '600', color: '#fff', margin: 0, lineHeight: '1.4' }}>
+                <p style={{ fontSize: '18px', fontWeight: '600', color: '#fff', margin: 0 }}>
                   {analysis.primaryLanguage}
+                </p>
+              </div>
+
+              <div className="card" style={{ padding: '24px', borderRadius: '16px' }}>
+                <div style={{ 
+                  width: '40px', height: '40px', 
+                  background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', 
+                  borderRadius: '10px', 
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  marginBottom: '16px'
+                }}>
+                  <Activity size={20} color="white" />
+                </div>
+                <h4 style={{ fontSize: '14px', fontWeight: '500', color: 'var(--muted)', marginBottom: '8px', margin: 0 }}>
+                  Complexity
+                </h4>
+                <p style={{ fontSize: '16px', fontWeight: '600', color: '#fff', margin: 0 }}>
+                  {analysis.summary?.projectComplexity || 'Simple'}
                 </p>
               </div>
             </div>
