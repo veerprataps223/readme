@@ -14,7 +14,7 @@ app.use(cors({
   origin: [
     'http://localhost:3000', 
     'http://localhost:5173',
-    'https://readme-livid.vercel.app/',
+    'https://readme-git-gemini.vercel.app/',
     /\.vercel\.app$/,
     /\.netlify\.app$/,
   ],

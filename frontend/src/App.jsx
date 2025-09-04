@@ -33,6 +33,7 @@ export default function App() {
   const [repoUrl, setRepoUrl] = useState("");
   const [readme, setReadme] = useState("");
   const [loading, setLoading] = useState(false);
+  const [analysis, setAnalysis] = useState(null);
   const [needsReset, setNeedsReset] = useState(false);
   const [displayedText, setDisplayedText] = useState("");
   const [progress, setProgress] = useState("");
@@ -42,6 +43,7 @@ export default function App() {
   const [abortController, setAbortController] = useState(null);
   const [typingInterval, setTypingInterval] = useState(null);
   const [copied, setCopied] = useState(false);
+  const analysisRef = useRef(null);
   const previewRef = useRef(null);
 
   useEffect(() => {
@@ -108,6 +110,7 @@ export default function App() {
 
     setLoading(true);
     setDisplayedText("");
+    setAnalysis(null);
     setError("");
     setProgress("Analyzing repository...");
 
@@ -130,12 +133,19 @@ export default function App() {
       
       setProgress("AI is writing your README...");
       setReadme(data.readme);
+      setAnalysis(data.analysis);
       
       requestAnimationFrame(() => {
         setTimeout(() => {
-          if (previewRef.current) {
-            previewRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+          if (analysisRef.current) {
+            analysisRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
           }
+          // After analysis section, scroll to preview when it appears
+          setTimeout(() => {
+            if (previewRef.current) {
+              previewRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+          }, 800);
         }, 300);
       });
 
@@ -226,6 +236,7 @@ export default function App() {
     
     setReadme("");
     setDisplayedText("");
+    setAnalysis(null);
     setNeedsReset(false);
     setProgress("");
     setError("");
@@ -503,9 +514,86 @@ export default function App() {
                   Reset
                 </button>
               </div>
+              {analysis && (
+                <div style={{ fontSize: '14px', color: 'var(--muted)' }}>
+                  Analyzed {analysis.analyzedFiles} of {analysis.totalFiles} files
+                </div>
+              )}
             </div>
           </div>
         </div>
+
+        {/* Analysis Section */}
+        {analysis && (
+          <div ref={analysisRef} className="card slide-in" style={{ borderRadius: '20px', padding: '32px', marginBottom: '32px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
+              <div style={{ 
+                width: '48px', height: '48px', 
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', 
+                borderRadius: '12px', 
+                display: 'flex', alignItems: 'center', justifyContent: 'center' 
+              }}>
+                <Code size={24} color="white" />
+              </div>
+              <h3 style={{ fontSize: '24px', fontWeight: '700', color: '#fff', margin: 0 }}>Repository Analysis</h3>
+            </div>
+            
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', 
+              gap: '20px' 
+            }}>
+              {[
+                { 
+                  label: "Primary Language", 
+                  value: analysis.mainLanguage, 
+                  color: "linear-gradient(135deg, #a855f7 0%, #7c3aed 100%)",
+                  icon: <Code size={20} color="white" />
+                },
+                { 
+                  label: "Technologies", 
+                  value: analysis.languages?.join(", "), 
+                  color: "linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)",
+                  icon: <FileText size={20} color="white" />
+                },
+                { 
+                  label: "Features Detected", 
+                  value: [
+                    analysis.hasTests && "Tests", 
+                    analysis.hasDocker && "Docker", 
+                    analysis.hasCICD && "CI/CD"
+                  ].filter(Boolean).join(" • ") || "Basic Setup", 
+                  color: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                  icon: <CheckCircle size={20} color="white" />
+                },
+                { 
+                  label: "Files Processed", 
+                  value: `${analysis.analyzedFiles} / ${analysis.totalFiles}`, 
+                  color: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
+                  icon: <FileText size={20} color="white" />
+                }
+              ].map((item, i) => (
+                <div key={i} className="card" style={{ padding: '24px', borderRadius: '16px' }}>
+                  <div style={{ 
+                    width: '40px', height: '40px', 
+                    background: item.color, 
+                    borderRadius: '10px', 
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    marginBottom: '16px'
+                  }}>
+                    {item.icon}
+                  </div>
+                  <h4 style={{ fontSize: '14px', fontWeight: '500', color: 'var(--muted)', marginBottom: '8px', margin: 0 }}>
+                    {item.label}
+                  </h4>
+                  <p style={{ fontSize: '16px', fontWeight: '600', color: '#fff', margin: 0, lineHeight: '1.4' }}>
+                    {item.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Preview Section */}
         {displayedText && (
