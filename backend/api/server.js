@@ -163,19 +163,31 @@ CRITICAL: Return ONLY raw markdown content. Do NOT wrap it in code blocks. Do NO
 }
 
 // Analyze files to provide context to Gemini
-function analyzeFiles(files) {
+// Enhanced analyze files function - replace the existing analyzeFiles function with this
+async function analyzeFiles(files) {
   const analysis = {
     totalFiles: files.length,
     languages: new Set(),
     frameworks: new Set(),
+    libraries: new Set(),
     hasTests: false,
     hasDocker: false,
     hasCICD: false,
     hasReadme: false,
     configFiles: [],
-    mainFiles: []
+    mainFiles: [],
+    projectType: 'Unknown',
+    dependencies: new Set(),
+    detectedTechnologies: new Set()
   };
 
+  // Configuration file contents to analyze
+  let requirementsTxt = '';
+  let setupPy = '';
+  let packageJson = '';
+  let pyprojectToml = '';
+
+  // First pass - filename analysis and identify key files
   files.forEach(file => {
     const name = file.name.toLowerCase();
     const ext = name.split('.').pop();
@@ -184,42 +196,292 @@ function analyzeFiles(files) {
     const langMap = {
       'js': 'JavaScript', 'ts': 'TypeScript', 'py': 'Python', 'java': 'Java',
       'cpp': 'C++', 'c': 'C', 'rb': 'Ruby', 'php': 'PHP', 'go': 'Go',
-      'rs': 'Rust', 'swift': 'Swift', 'kt': 'Kotlin', 'scala': 'Scala'
+      'rs': 'Rust', 'swift': 'Swift', 'kt': 'Kotlin', 'scala': 'Scala',
+      'r': 'R', 'jl': 'Julia', 'sh': 'Shell', 'yml': 'YAML', 'yaml': 'YAML'
     };
     if (langMap[ext]) analysis.languages.add(langMap[ext]);
 
-    // Framework detection
-    if (name === 'package.json') analysis.frameworks.add('Node.js');
-    if (name === 'requirements.txt' || name === 'setup.py') analysis.frameworks.add('Python');
-    if (name === 'pom.xml' || name === 'build.gradle') analysis.frameworks.add('Java');
-    if (name === 'cargo.toml') analysis.frameworks.add('Rust');
-    if (name === 'go.mod') analysis.frameworks.add('Go');
-
-    // Special files
-    if (name.includes('test') || name.includes('spec')) analysis.hasTests = true;
-    if (name === 'dockerfile' || name === 'docker-compose.yml') analysis.hasDocker = true;
-    if (name.includes('ci') || name.includes('workflow') || name === '.travis.yml') analysis.hasCICD = true;
-    if (name === 'readme.md') analysis.hasReadme = true;
-
-    // Important files
-    if (['package.json', 'requirements.txt', 'cargo.toml', 'go.mod', 'pom.xml'].includes(name)) {
+    // Framework/Technology detection from filenames
+    if (name === 'package.json') {
+      analysis.frameworks.add('Node.js');
       analysis.configFiles.push(file.name);
     }
-    if (['index.js', 'main.py', 'app.js', 'server.js', 'main.go'].includes(name)) {
+    if (name === 'requirements.txt' || name === 'setup.py' || name === 'pyproject.toml') {
+      analysis.frameworks.add('Python');
+      analysis.configFiles.push(file.name);
+    }
+    if (name === 'pom.xml' || name === 'build.gradle') {
+      analysis.frameworks.add('Java');
+      analysis.configFiles.push(file.name);
+    }
+    if (name === 'cargo.toml') {
+      analysis.frameworks.add('Rust');
+      analysis.configFiles.push(file.name);
+    }
+    if (name === 'go.mod') {
+      analysis.frameworks.add('Go');
+      analysis.configFiles.push(file.name);
+    }
+
+    // Special files detection
+    if (name.includes('test') || name.includes('spec')) analysis.hasTests = true;
+    if (name === 'dockerfile' || name === 'docker-compose.yml') analysis.hasDocker = true;
+    if (name.includes('ci') || name.includes('workflow') || name === '.travis.yml' || name === '.github') analysis.hasCICD = true;
+    if (name === 'readme.md') analysis.hasReadme = true;
+
+    // Main files
+    if (['index.js', 'main.py', 'app.js', 'server.js', 'main.go', '__init__.py'].includes(name)) {
       analysis.mainFiles.push(file.name);
+    }
+
+    // Python-specific detection
+    if (ext === 'py') {
+      // Detect common Python ML/DS patterns from filenames
+      if (name.includes('model') || name.includes('train') || name.includes('predict')) {
+        analysis.detectedTechnologies.add('Machine Learning');
+      }
+      if (name.includes('data') || name.includes('preprocess')) {
+        analysis.detectedTechnologies.add('Data Processing');
+      }
+    }
+
+    // JavaScript/TypeScript specific detection
+    if (ext === 'js' || ext === 'ts') {
+      if (name.includes('component') || name.includes('hook')) {
+        analysis.detectedTechnologies.add('React');
+      }
+      if (name.includes('test') || name.includes('spec')) {
+        analysis.detectedTechnologies.add('Testing');
+      }
     }
   });
 
+  // Try to fetch and analyze key configuration files
+  try {
+    // Analyze Python dependencies
+    const requirementsFile = files.find(f => f.name.toLowerCase() === 'requirements.txt');
+    const setupFile = files.find(f => f.name.toLowerCase() === 'setup.py');
+    const pyprojectFile = files.find(f => f.name.toLowerCase() === 'pyproject.toml');
+
+    if (requirementsFile && requirementsFile.download_url) {
+      try {
+        const response = await fetch(requirementsFile.download_url);
+        if (response.ok) {
+          requirementsTxt = await response.text();
+          analyzePythonDependencies(requirementsTxt, analysis);
+        }
+      } catch (error) {
+        console.log('Could not fetch requirements.txt:', error.message);
+      }
+    }
+
+    if (setupFile && setupFile.download_url) {
+      try {
+        const response = await fetch(setupFile.download_url);
+        if (response.ok) {
+          setupPy = await response.text();
+          analyzeSetupPy(setupPy, analysis);
+        }
+      } catch (error) {
+        console.log('Could not fetch setup.py:', error.message);
+      }
+    }
+
+    // Analyze package.json for Node.js projects
+    const packageFile = files.find(f => f.name.toLowerCase() === 'package.json');
+    if (packageFile && packageFile.download_url) {
+      try {
+        const response = await fetch(packageFile.download_url);
+        if (response.ok) {
+          packageJson = await response.text();
+          analyzePackageJson(packageJson, analysis);
+        }
+      } catch (error) {
+        console.log('Could not fetch package.json:', error.message);
+      }
+    }
+
+  } catch (error) {
+    console.log('Error analyzing configuration files:', error.message);
+  }
+
+  // Determine project type based on detected technologies and dependencies
+  determineProjectType(analysis);
+
+  return formatAnalysisOutput(analysis);
+}
+
+function analyzePythonDependencies(content, analysis) {
+  const lines = content.split('\n');
+  const commonLibraries = {
+    'numpy': 'NumPy',
+    'pandas': 'Pandas', 
+    'scikit-learn': 'Scikit-Learn',
+    'sklearn': 'Scikit-Learn',
+    'tensorflow': 'TensorFlow',
+    'torch': 'PyTorch',
+    'pytorch': 'PyTorch',
+    'matplotlib': 'Matplotlib',
+    'seaborn': 'Seaborn',
+    'flask': 'Flask',
+    'django': 'Django',
+    'fastapi': 'FastAPI',
+    'requests': 'Requests',
+    'pytest': 'Pytest',
+    'opencv': 'OpenCV',
+    'cv2': 'OpenCV',
+    'scipy': 'SciPy',
+    'jupyter': 'Jupyter',
+    'notebook': 'Jupyter Notebook',
+    'streamlit': 'Streamlit',
+    'plotly': 'Plotly',
+    'sqlalchemy': 'SQLAlchemy',
+    'celery': 'Celery',
+    'redis': 'Redis',
+    'nltk': 'NLTK',
+    'spacy': 'spaCy',
+    'keras': 'Keras'
+  };
+
+  lines.forEach(line => {
+    const cleanLine = line.toLowerCase().trim().split(/[>=<]/)[0].trim();
+    if (commonLibraries[cleanLine]) {
+      analysis.libraries.add(commonLibraries[cleanLine]);
+      analysis.dependencies.add(cleanLine);
+    }
+    
+    // Check for ML/DS indicators
+    if (cleanLine.includes('scikit') || cleanLine.includes('sklearn') || cleanLine.includes('tensorflow') || cleanLine.includes('torch')) {
+      analysis.detectedTechnologies.add('Machine Learning');
+    }
+    if (cleanLine.includes('pandas') || cleanLine.includes('numpy')) {
+      analysis.detectedTechnologies.add('Data Science');
+    }
+    if (cleanLine.includes('flask') || cleanLine.includes('django') || cleanLine.includes('fastapi')) {
+      analysis.detectedTechnologies.add('Web Framework');
+    }
+  });
+}
+
+function analyzeSetupPy(content, analysis) {
+  // Extract dependencies from setup.py
+  const installRequiresMatch = content.match(/install_requires\s*=\s*\[(.*?)\]/s);
+  if (installRequiresMatch) {
+    const deps = installRequiresMatch[1].replace(/['"]/g, '').split(',');
+    deps.forEach(dep => {
+      const cleanDep = dep.trim().toLowerCase().split(/[>=<]/)[0].trim();
+      analysis.dependencies.add(cleanDep);
+      
+      // Check for common libraries
+      if (cleanDep.includes('scikit') || cleanDep.includes('sklearn')) {
+        analysis.libraries.add('Scikit-Learn');
+        analysis.detectedTechnologies.add('Machine Learning');
+      }
+      if (cleanDep.includes('numpy')) {
+        analysis.libraries.add('NumPy');
+      }
+      if (cleanDep.includes('pandas')) {
+        analysis.libraries.add('Pandas');
+        analysis.detectedTechnologies.add('Data Science');
+      }
+    });
+  }
+
+  // Extract project description/name for type detection
+  const nameMatch = content.match(/name\s*=\s*['"](.*?)['"]/);
+  if (nameMatch) {
+    const projectName = nameMatch[1].toLowerCase();
+    if (projectName.includes('ml') || projectName.includes('learn') || projectName.includes('model')) {
+      analysis.detectedTechnologies.add('Machine Learning');
+    }
+  }
+}
+
+function analyzePackageJson(content, analysis) {
+  try {
+    const pkg = JSON.parse(content);
+    const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+    
+    Object.keys(allDeps).forEach(dep => {
+      const depName = dep.toLowerCase();
+      
+      // React ecosystem
+      if (depName.includes('react')) {
+        analysis.libraries.add('React');
+        analysis.detectedTechnologies.add('Frontend Framework');
+      }
+      if (depName.includes('vue')) {
+        analysis.libraries.add('Vue.js');
+        analysis.detectedTechnologies.add('Frontend Framework');
+      }
+      if (depName.includes('angular')) {
+        analysis.libraries.add('Angular');
+        analysis.detectedTechnologies.add('Frontend Framework');
+      }
+      
+      // Backend
+      if (depName.includes('express')) {
+        analysis.libraries.add('Express.js');
+        analysis.detectedTechnologies.add('Web Framework');
+      }
+      if (depName.includes('next')) {
+        analysis.libraries.add('Next.js');
+        analysis.detectedTechnologies.add('Full-Stack Framework');
+      }
+      
+      // Testing
+      if (depName.includes('jest') || depName.includes('mocha') || depName.includes('chai')) {
+        analysis.detectedTechnologies.add('Testing');
+      }
+    });
+  } catch (error) {
+    console.log('Error parsing package.json:', error.message);
+  }
+}
+
+function determineProjectType(analysis) {
+  const techs = Array.from(analysis.detectedTechnologies);
+  const libs = Array.from(analysis.libraries);
+  
+  if (libs.some(lib => ['Scikit-Learn', 'TensorFlow', 'PyTorch'].includes(lib))) {
+    analysis.projectType = 'Machine Learning Library';
+  } else if (techs.includes('Machine Learning')) {
+    analysis.projectType = 'Machine Learning Project';
+  } else if (techs.includes('Data Science') || libs.includes('Pandas')) {
+    analysis.projectType = 'Data Science Project';
+  } else if (techs.includes('Web Framework')) {
+    analysis.projectType = 'Web Application';
+  } else if (techs.includes('Frontend Framework')) {
+    analysis.projectType = 'Frontend Application';
+  } else if (analysis.languages.has('Python')) {
+    analysis.projectType = 'Python Project';
+  } else if (analysis.languages.has('JavaScript')) {
+    analysis.projectType = 'JavaScript Project';
+  }
+}
+
+function formatAnalysisOutput(analysis) {
+  // Combine technologies for display
+  const allTechnologies = new Set([
+    ...Array.from(analysis.languages),
+    ...Array.from(analysis.frameworks),
+    ...Array.from(analysis.libraries),
+    ...Array.from(analysis.detectedTechnologies)
+  ]);
+
   return `
 - Total files: ${analysis.totalFiles}
+- Project Type: ${analysis.projectType}
 - Languages: ${Array.from(analysis.languages).join(', ') || 'Unknown'}
-- Frameworks: ${Array.from(analysis.frameworks).join(', ') || 'None detected'}
+- Technologies: ${Array.from(allTechnologies).join(', ') || 'None detected'}
+- Key Libraries: ${Array.from(analysis.libraries).join(', ') || 'None detected'}
 - Has tests: ${analysis.hasTests ? 'Yes' : 'No'}
 - Has Docker: ${analysis.hasDocker ? 'Yes' : 'No'}
 - Has CI/CD: ${analysis.hasCICD ? 'Yes' : 'No'}
 - Config files: ${analysis.configFiles.join(', ') || 'None'}
 - Main files: ${analysis.mainFiles.join(', ') || 'None'}
-- Key files found: ${files.slice(0, 10).map(f => f.name).join(', ')}`;
+- Key files found: ${files.slice(0, 10).map(f => f.name).join(', ')}
+- Dependencies detected: ${analysis.dependencies.size} packages`;
 }
 
 // Debug function to check GitHub API status
