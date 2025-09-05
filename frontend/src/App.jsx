@@ -64,9 +64,9 @@ const renderMarkdown = (text) => {
 };
 
 const sampleRepos = [
-  { name: "microsoft/vscode", url: "https://github.com/microsoft/vscode" },
-  { name: "facebook/react", url: "https://github.com/facebook/react" },
-  { name: "vercel/next.js", url: "https://github.com/vercel/next.js" },
+  { name: "veerprataps223/readme", url: "https://github.com/veerprataps223/readme" },
+  { name: "bytebot-ai/bytebot", url: "https://github.com/bytebot-ai/bytebot" },
+  { name: "emcie-co/parlant", url: "https://github.com/emcie-co/parlant" },
 ];
 
 export default function App() {
@@ -659,7 +659,7 @@ export default function App() {
 
       {/* Sample Repositories Buttons */}
       <section className="sample-repos" aria-label="Sample Repositories">
-        <p className="sample-text">Try with popular repositories:</p>
+        <p className="sample-text">Some repositories to try:</p>
         <div className="repo-buttons">
           {sampleRepos.map((repo, i) => (
             <button
