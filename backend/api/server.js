@@ -55,24 +55,30 @@ app.use(session({
   resave: false, 
   saveUninitialized: false,
   cookie: { 
-    secure: process.env.NODE_ENV === 'production', 
-    maxAge: 24 * 60 * 60 * 1000,
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
-  }
+    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Critical for cross-site
+    httpOnly: true, // Security: prevent XSS
+    domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined // Allow subdomain sharing
+  },
+  name: 'readme_session' // Custom session name
 }));
 
-app.use(express.json({ limit: '10mb' }));
 app.use(cors({
   origin: [
-    /localhost:\d+/, 
-    /\.vercel\.app$/, 
+    'http://localhost:3000',
+    'https://readme-git-gemini.vercel.app',
+    /\.vercel\.app$/,
     /\.netlify\.app$/,
     /\.onrender\.com$/
   ],
   credentials: true, 
   methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+  exposedHeaders: ['Set-Cookie']
 }));
+
+app.options('*', cors());
 
 // Trust proxy for production
 if (process.env.NODE_ENV === 'production') {
