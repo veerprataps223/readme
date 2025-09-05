@@ -2,8 +2,8 @@ import express from "express";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 import cors from "cors";
-import session from "express-session";
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import * as babelParser from "@babel/parser";
 import traverse from "@babel/traverse";
 
@@ -15,19 +15,22 @@ const GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models/gemi
 const GITHUB_OAUTH_URL = "https://github.com/login/oauth/authorize";
 const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const activeConnections = new Map();
+const JWT_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(64).toString('hex');
 
 // Middleware
-app.use(session({
-  secret: process.env.SESSION_SECRET || crypto.randomBytes(64).toString('hex'),
-  resave: false, saveUninitialized: false,
-  cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 24 * 60 * 60 * 1000 }
-}));
 app.use(express.json({ limit: '10mb' }));
 app.use(cors({
-  origin: [/localhost:\d+/, /\.vercel\.app$/, /\.netlify\.app$/],
+  origin: [/localhost:\d+/, /\.vercel\.app$/, /\.netlify\.app$/, /\.onrender\.com$/],
   credentials: true, methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// JWT Helper Functions
+const createAuthToken = (data) => jwt.sign(data, JWT_SECRET, { expiresIn: '24h' });
+const verifyAuthToken = (token) => {
+  try { return jwt.verify(token, JWT_SECRET); } 
+  catch (error) { return null; }
+};
 
 // Utilities
 const parseGitHubUrl = (url) => {
@@ -418,18 +421,17 @@ Return ONLY the markdown content without any wrapper text.`;
 
 // Routes
 app.get("/", (req, res) => res.json({
-  message: "Fixed README Generator v5.2 with Accurate Code Analysis",
+  message: "README Generator v6.0 with JWT Authentication",
   endpoints: ["/health", "/test-gemini", "/generate-readme", "/auth/github", "/auth/callback", "/auth/user", "/auth/logout"],
   model: "gemini-2.0-flash-exp", 
-  features: ["Fixed AST parsing", "300-line code snippets", "Accurate semantic analysis", "Proper private/public repo detection", "Enhanced business logic detection", "Intelligent file prioritization"]
+  features: ["JWT Authentication", "Serverless Compatible", "AST parsing", "Accurate semantic analysis", "Private/public repo detection"]
 }));
 
 app.get("/auth/github", (req, res) => {
   const state = crypto.randomBytes(16).toString('hex');
-  req.session.oauthState = state;
   const params = new URLSearchParams({
     client_id: process.env.GITHUB_CLIENT_ID,
-    redirect_uri: `${process.env.APP_URL || 'http://localhost:5000'}/auth/callback`,
+    redirect_uri: `${process.env.APP_URL}/auth/callback`,
     scope: 'repo', state
   });
   res.redirect(`${GITHUB_OAUTH_URL}?${params}`);
@@ -438,15 +440,14 @@ app.get("/auth/github", (req, res) => {
 app.get("/auth/callback", async (req, res) => {
   const { code, state } = req.query;
   
-  if (!state || state !== req.session.oauthState) return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}?error=invalid_state`);
-  if (!code) return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}?error=access_denied`);
+  if (!code) return res.redirect(`${process.env.FRONTEND_URL}?error=access_denied`);
   
   try {
     const tokenResponse = await fetch(GITHUB_TOKEN_URL, {
       method: 'POST', headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         client_id: process.env.GITHUB_CLIENT_ID, client_secret: process.env.GITHUB_CLIENT_SECRET, code,
-        redirect_uri: `${process.env.APP_URL || 'http://localhost:5000'}/auth/callback`
+        redirect_uri: `${process.env.APP_URL}/auth/callback`
       })
     });
     
@@ -458,21 +459,29 @@ app.get("/auth/callback", async (req, res) => {
     });
     const userData = await userResponse.json();
     
-    req.session.github = {
+    const authToken = createAuthToken({
       accessToken: tokenData.access_token,
       user: { id: userData.id, login: userData.login, name: userData.name, avatar_url: userData.avatar_url }
-    };
+    });
     
-    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}?auth=success`);
+    res.redirect(`${process.env.FRONTEND_URL}?auth=success&token=${authToken}`);
   } catch (error) {
-    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}?error=oauth_failed`);
+    res.redirect(`${process.env.FRONTEND_URL}?error=oauth_failed`);
   }
 });
 
-app.get("/auth/user", (req, res) => res.json(req.session.github ? { authenticated: true, user: req.session.github.user } : { authenticated: false, user: null }));
+app.get("/auth/user", (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
+  if (!token) return res.json({ authenticated: false, user: null });
+  
+  const userData = verifyAuthToken(token);
+  if (!userData) return res.json({ authenticated: false, user: null, error: 'Invalid token' });
+  
+  res.json({ authenticated: true, user: userData.user, token });
+});
 
 app.post("/auth/logout", (req, res) => {
-  req.session.destroy(err => err ? res.status(500).json({ error: 'Failed to logout' }) : res.json({ success: true }));
+  res.json({ success: true, message: 'Logged out successfully' });
 });
 
 app.post("/check-repo", async (req, res) => {
@@ -483,10 +492,15 @@ app.post("/check-repo", async (req, res) => {
     const repoInfo = parseGitHubUrl(repoUrl);
     if (!repoInfo) return res.status(400).json({ error: "Invalid GitHub URL format" });
 
-    const userToken = req.session.github?.accessToken;
-    const accessCheck = await checkRepoAccess(repoInfo.owner, repoInfo.repo, userToken);
+    const authToken = req.headers.authorization?.replace('Bearer ', '');
+    let userToken = null;
+    if (authToken) {
+      const userData = verifyAuthToken(authToken);
+      if (userData) userToken = userData.accessToken;
+    }
 
-    res.json({ ...accessCheck, repoInfo, userAuthenticated: !!req.session.github, canGenerate: accessCheck.accessible, needsAuth: accessCheck.requiresAuth && !userToken });
+    const accessCheck = await checkRepoAccess(repoInfo.owner, repoInfo.repo, userToken);
+    res.json({ ...accessCheck, repoInfo, userAuthenticated: !!userToken, canGenerate: accessCheck.accessible, needsAuth: accessCheck.requiresAuth && !userToken });
   } catch (error) {
     res.status(500).json({ error: 'Failed to check repository access', details: error.message, accessible: false, requiresAuth: false });
   }
@@ -496,7 +510,7 @@ app.get("/test-gemini", async (req, res) => {
   try {
     const response = await fetch(`${GEMINI_API}?key=${process.env.GEMINI_API_KEY}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: "Hello! Respond with 'Fixed README generator with accurate code analysis working!'" }] }] })
+      body: JSON.stringify({ contents: [{ parts: [{ text: "Hello! Respond with 'JWT README generator working!'" }] }] })
     });
 
     const data = await response.json();
@@ -514,7 +528,7 @@ app.get("/progress/:sessionId", (req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'Access-Control-Allow-Origin': '*' });
 
   activeConnections.set(sessionId, res);
-  res.write(`data: ${JSON.stringify({ step: 'connected', progress: 0, message: 'Connected to fixed code analysis stream with accurate repository detection' })}\n\n`);
+  res.write(`data: ${JSON.stringify({ step: 'connected', progress: 0, message: 'Connected to JWT-based analysis stream' })}\n\n`);
 
   req.on('close', () => activeConnections.delete(sessionId));
 });
@@ -527,7 +541,17 @@ app.post("/generate-readme", async (req, res) => {
     const repoInfo = parseGitHubUrl(repoUrl);
     if (!repoInfo) return res.status(400).json({ error: "Invalid GitHub URL format" });
 
-    const userToken = req.session.github?.accessToken;
+    const authToken = req.headers.authorization?.replace('Bearer ', '');
+    let userToken = null;
+    let authenticatedUser = null;
+    
+    if (authToken) {
+      const userData = verifyAuthToken(authToken);
+      if (userData) {
+        userToken = userData.accessToken;
+        authenticatedUser = userData.user;
+      }
+    }
 
     const progressCallback = (data) => {
       if (sessionId && activeConnections.has(sessionId)) {
@@ -535,7 +559,7 @@ app.post("/generate-readme", async (req, res) => {
       }
     };
 
-    progressCallback({ step: 'initializing', progress: 5, message: 'Initializing fixed code analysis with accurate repository detection...', estimatedTime: 120 });
+    progressCallback({ step: 'initializing', progress: 5, message: 'Initializing JWT-based code analysis...', estimatedTime: 120 });
 
     const accessCheck = await checkRepoAccess(repoInfo.owner, repoInfo.repo, userToken);
     
@@ -550,19 +574,19 @@ app.post("/generate-readme", async (req, res) => {
     const files = await fetchRepoFiles(repoInfo.owner, repoInfo.repo, "", 0, progressCallback, userToken);
     if (files.length === 0) throw new Error("No accessible files found in repository");
 
-    progressCallback({ step: 'analyzing', progress: 25, message: 'Starting comprehensive code analysis with 300-line extraction...', estimatedTime: 90 });
+    progressCallback({ step: 'analyzing', progress: 25, message: 'Starting comprehensive code analysis...', estimatedTime: 90 });
 
     const codeAnalysis = await performDeepCodeAnalysis(files, progressCallback);
     
-    progressCallback({ step: 'analyzing', progress: 60, message: 'Generating semantic analysis from extracted code...', estimatedTime: 50 });
+    progressCallback({ step: 'analyzing', progress: 60, message: 'Generating semantic analysis...', estimatedTime: 50 });
 
     const semanticAnalysis = generateSemanticAnalysis(codeAnalysis);
     
-    progressCallback({ step: 'generating', progress: 70, message: 'Creating intelligent README based on comprehensive analysis...', estimatedTime: 40 });
+    progressCallback({ step: 'generating', progress: 70, message: 'Creating intelligent README...', estimatedTime: 40 });
 
     const readme = await generateIntelligentReadme(repoInfo, repoData, semanticAnalysis, codeAnalysis, progressCallback);
 
-    progressCallback({ step: 'complete', progress: 100, message: 'Fixed README generated successfully with accurate analysis!', estimatedTime: 0 });
+    progressCallback({ step: 'complete', progress: 100, message: 'README generated successfully!', estimatedTime: 0 });
 
     setTimeout(() => {
       if (sessionId && activeConnections.has(sessionId)) {
@@ -577,7 +601,7 @@ app.post("/generate-readme", async (req, res) => {
         totalFiles: files.length, analyzedFiles: codeAnalysis.length, primaryLanguage: repoData.language, 
         projectPurpose: semanticAnalysis.projectPurpose, technicalStack: semanticAnalysis.technicalStack, 
         mainFeatures: semanticAnalysis.mainFeatures, apiEndpoints: semanticAnalysis.apiEndpoints.length, 
-        businessLogicItems: semanticAnalysis.businessLogic.length, intelligenceLevel: 'Fixed AST + 300-line Code Snippets + Accurate Semantic Analysis',
+        businessLogicItems: semanticAnalysis.businessLogic.length, intelligenceLevel: 'JWT + AST + Code Snippets + Semantic Analysis',
         codeSnippetsExtracted: codeAnalysis.filter(a => a.codeSnippets).length,
         totalCodeLines: codeAnalysis.reduce((total, analysis) => total + (analysis.codeSnippets ? analysis.codeSnippets.split('\n').length : 0), 0),
         repositoryType: accessCheck.accessLevel
@@ -599,7 +623,7 @@ app.post("/generate-readme", async (req, res) => {
         forks: repoData.forks_count, language: repoData.language, size: repoData.size, private: repoData.private,
         lastUpdated: repoData.updated_at, createdAt: repoData.created_at, accessLevel: accessCheck.accessLevel
       },
-      user: req.session.github?.user || null
+      user: authenticatedUser
     });
 
   } catch (error) {
@@ -611,19 +635,14 @@ app.post("/generate-readme", async (req, res) => {
     }
     
     if (error.message === 'AUTH_REQUIRED') {
-      return res.status(401).json({ error: 'Authentication required for repository access', requiresAuth: true, details: 'This repository might be private or requires authentication for comprehensive analysis' });
+      return res.status(401).json({ error: 'Authentication required for repository access', requiresAuth: true });
     }
     
-    const status = error.message.includes('not found') || error.message.includes('REPO_INVALID') ? 404 : 
+    const status = error.message.includes('not found') ? 404 : 
                    error.message.includes('Rate limit') ? 429 : 
                    error.message.includes('REPO_PRIVATE') ? 403 : 500;
                    
-    res.status(status).json({ 
-      error: error.message,
-      details: error.message.includes('not found') || error.message.includes('REPO_INVALID') ? 'Repository does not exist or is not accessible' : 
-        error.message.includes('Rate limit') ? 'GitHub API rate limit exceeded. Please try again later.' : 
-        error.message.includes('REPO_PRIVATE') ? 'Private repository requires authentication' : 'Code analysis failed. Please try again.'
-    });
+    res.status(status).json({ error: error.message, details: 'Please try again.' });
   }
 });
 
@@ -636,13 +655,12 @@ app.get("/health", async (req, res) => {
     }).then(r => r.ok).catch(() => false) : false;
 
     res.json({
-      status: "healthy", version: "5.2-fixed",
-      capabilities: { fixedAstCodeParsing: true, accurateSemanticAnalysis: true, properRepoDetection: true, businessLogicDetection: true, intelligentFilePrioritization: true, jsAstAnalysis: true, pythonCodeAnalysis: true, enhancedCodeSnippets: true, upTo300LineAnalysis: true, publicPrivateRepoDistinction: true },
+      status: "healthy", version: "6.0-jwt",
+      capabilities: { jwtAuthentication: true, serverlessCompatible: true, astCodeParsing: true, accurateSemanticAnalysis: true, properRepoDetection: true },
       environment: { hasGeminiKey: !!process.env.GEMINI_API_KEY, hasGithubToken: !!process.env.GITHUB_TOKEN, hasGithubOAuth: !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET), port: PORT, nodeEnv: process.env.NODE_ENV || 'development' },
       connectivity: { github: githubTest ? 'connected' : 'failed', gemini: geminiTest ? 'connected' : 'failed' },
-      model: "gemini-2.0-flash-exp", analysisEngine: "Fixed Babel AST + 300-line Code Snippets + Accurate Repository Detection",
-      codeAnalysisFeatures: { maxCodeLinesPerFile: 300, maxFileSize: "1MB", enhancedContentExtraction: true, intelligentSnippetSelection: true, frameworkDetection: true, businessLogicAnalysis: true, properErrorHandling: true, accurateRepoTypeDetection: true },
-      fixes: ["Fixed code analysis not reading actual code content", "Added proper public/private/invalid repository distinction", "Enhanced error handling and logging", "Improved AST parsing with better error recovery", "Fixed semantic analysis generation"],
+      model: "gemini-2.0-flash-exp", 
+      authSystem: "JWT-based (serverless compatible)",
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -662,12 +680,10 @@ app.use('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Fixed README Generator v5.2 running on port ${PORT}`);
-  console.log(`🔧 FIXES: Code analysis now properly reads and analyzes actual code content`);
-  console.log(`🔍 ENHANCEMENT: Proper public/private/invalid repository detection`);
-  console.log(`🧠 Enhanced AST-powered code analysis with up to 300 lines per file`);
-  console.log(`📊 Accurate semantic analysis with comprehensive business logic detection`);
-  console.log(`📝 Code Analysis: Up to 300 lines per file, 1MB file size limit, 50 priority files`);
+  console.log(`🚀 README Generator v6.0 with JWT Authentication running on port ${PORT}`);
+  console.log(`🔧 FIXED: JWT-based authentication for serverless compatibility`);
+  console.log(`🔍 ENHANCEMENT: No more session dependency - fully serverless`);
+  console.log(`📊 Features: AST parsing, semantic analysis, private/public repo detection`);
   console.log(`🔑 GitHub Token: ${process.env.GITHUB_TOKEN ? '✅ Active' : '❌ Missing'}`);
   console.log(`🔑 GitHub OAuth: ${process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET ? '✅ Configured' : '❌ Missing'}`);
   console.log(`🔑 Gemini Key: ${process.env.GEMINI_API_KEY ? '✅ Active' : '❌ Missing'}`);
