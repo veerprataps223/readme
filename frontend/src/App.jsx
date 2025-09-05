@@ -201,36 +201,40 @@ export default function App() {
 
   // Initial checks on mount
 
-  useEffect(() => {
+// Replace the existing useEffect with OAuth handling
+useEffect(() => {
+  checkAuthStatus();
+  checkGeminiStatus();
 
-    checkAuthStatus();
-
-    checkGeminiStatus();
-
-
-
-    // OAuth callback handling in URL
-
-    const urlParams = new URLSearchParams(window.location.search);
-
-    if (urlParams.get("auth") === "success") {
-
-      checkAuthStatus();
-
-      window.history.replaceState({}, document.title, window.location.pathname);
-
+  // IMPROVED: Better OAuth callback handling
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get("auth") === "success") {
+    const username = urlParams.get("user");
+    setError(""); // Clear any previous errors
+    setTimeout(() => checkAuthStatus(), 500); // Small delay for session sync
+    window.history.replaceState({}, document.title, window.location.pathname);
+    if (username) {
+      console.log(`Authentication successful for ${username}`);
     }
-
-    if (urlParams.get("error")) {
-
-      setError(`Authentication failed: ${urlParams.get("error")}`);
-
-      window.history.replaceState({}, document.title, window.location.pathname);
-
+  }
+  if (urlParams.get("error")) {
+    const errorType = urlParams.get("error");
+    const details = urlParams.get("details");
+    
+    // IMPROVED: More user-friendly error messages
+    let errorMessage = "Authentication failed";
+    if (errorType === "oauth_access_denied") {
+      errorMessage = "GitHub access was denied. Please try again.";
+    } else if (errorType === "state_expired") {
+      errorMessage = "Login session expired. Please try again.";
+    } else if (details) {
+      errorMessage = `Authentication failed: ${decodeURIComponent(details)}`;
     }
-
-  }, []);
-
+    
+    setError(errorMessage);
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+}, []);
 
 
   const checkAuthStatus = async () => {
