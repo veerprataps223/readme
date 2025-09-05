@@ -36,7 +36,7 @@ app.use(express.json({ limit: '10mb' }));
 // FIXED: Simplified CORS configuration
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://readme-git-gemini.vercel.app', 'https://readme-666x.onrender.com']
+    ? ['https://readme-git-gemini.vercel.app', 'https://readme-not.vercel.app/']
     : ['http://localhost:3000', 'http://localhost:5000'],
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
@@ -241,7 +241,7 @@ app.get("/auth/callback", async (req, res) => {
     const callbackUrl = process.env.APP_URL 
       ? `${process.env.APP_URL}/auth/callback`
       : isProduction 
-        ? 'https://readme-666x.onrender.com/auth/callback'
+        ? 'https://readme-not.vercel.app/auth/callback'
         : 'http://localhost:5000/auth/callback';
     
     // Exchange code for token

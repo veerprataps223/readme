@@ -52,7 +52,7 @@ import {
 // FIXED: Proper backend URL detection
 const BACKEND_URL = process.env.NODE_ENV === "development"
   ? "http://localhost:5000"
-  : process.env.REACT_APP_BACKEND_URL || "https://readme-666x.onrender.com";
+  : process.env.REACT_APP_BACKEND_URL || "https://readme-not.vercel.app/";
 
 
 
