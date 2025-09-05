@@ -350,7 +350,7 @@ ${codeAnalysis.map(analysis => {
 - Business Logic Components: ${semanticAnalysis.businessLogic.slice(0, 15).join(', ')}
 
 **CRITICAL INSTRUCTIONS:**
-1. Analyze the ACTUAL CODE SNIPPETS provided above - these are real code from the repository
+1. Analyze the ACTUAL CODE SNIPPETS provided above - these are real code from the repository , remember you are first person ,basically me, so don't act like third person, so give complete first person readme.md
 2. Create a title based on what the code actually does, not the repository name
 3. Describe functionality based on the actual functions, classes, API routes, and imports you can see
 4. Only mention features that are clearly evident in the code analysis
