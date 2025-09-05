@@ -18,7 +18,7 @@ const activeConnections = new Map();
 const JWT_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(64).toString('hex');
 
 // Middleware
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '20mb' }));
 app.use(cors({
   origin: [/localhost:\d+/, /\.vercel\.app$/, /\.netlify\.app$/, /\.onrender\.com$/],
   credentials: true, methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
