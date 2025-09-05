@@ -16,74 +16,18 @@ const GITHUB_OAUTH_URL = "https://github.com/login/oauth/authorize";
 const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const activeConnections = new Map();
 
-// Helper function to get the correct redirect URI
-const getRedirectUri = () => {
-  // Use explicit OAUTH_CALLBACK_URL if provided
-  if (process.env.OAUTH_CALLBACK_URL) {
-    return process.env.OAUTH_CALLBACK_URL;
-  }
-  
-  // Otherwise construct from APP_URL
-  if (process.env.APP_URL) {
-    return `${process.env.APP_URL}/auth/callback`;
-  }
-  
-  // Default for development
-  return 'http://localhost:5000/auth/callback';
-};
-
-// Helper function to get the correct base URL
-const getBaseUrl = (req) => {
-  if (process.env.APP_URL) {
-    return process.env.APP_URL;
-  }
-  
-  // For production, construct from request headers
-  if (process.env.NODE_ENV === 'production') {
-    const protocol = req.get('x-forwarded-proto') || (req.secure ? 'https' : 'http');
-    const host = req.get('x-forwarded-host') || req.get('host');
-    return `${protocol}://${host}`;
-  }
-  
-  // Default for development
-  return 'http://localhost:5000';
-};
-
 // Middleware
 app.use(session({
   secret: process.env.SESSION_SECRET || crypto.randomBytes(64).toString('hex'),
-  resave: false, 
-  saveUninitialized: false,
-  cookie: { 
-    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Critical for cross-site
-    httpOnly: true, // Security: prevent XSS
-    domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined // Allow subdomain sharing
-  },
-  name: 'readme_session' // Custom session name
+  resave: false, saveUninitialized: false,
+  cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 24 * 60 * 60 * 1000 }
 }));
-
+app.use(express.json({ limit: '10mb' }));
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'https://readme-git-gemini.vercel.app',
-    /\.vercel\.app$/,
-    /\.netlify\.app$/,
-    /\.onrender\.com$/
-  ],
-  credentials: true, 
-  methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-  exposedHeaders: ['Set-Cookie']
+  origin: [/localhost:\d+/, /\.vercel\.app$/, /\.netlify\.app$/],
+  credentials: true, methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
-
-app.options('*', cors());
-
-// Trust proxy for production
-if (process.env.NODE_ENV === 'production') {
-  app.set('trust proxy', 1);
-}
 
 // Utilities
 const parseGitHubUrl = (url) => {
@@ -474,114 +418,61 @@ Return ONLY the markdown content without any wrapper text.`;
 
 // Routes
 app.get("/", (req, res) => res.json({
-  message: "Fixed README Generator v5.3 with Proper OAuth Configuration",
+  message: "Fixed README Generator v5.2 with Accurate Code Analysis",
   endpoints: ["/health", "/test-gemini", "/generate-readme", "/auth/github", "/auth/callback", "/auth/user", "/auth/logout"],
   model: "gemini-2.0-flash-exp", 
-  features: ["Fixed OAuth redirect URI handling", "Proper environment variable usage", "Enhanced error logging", "Fixed AST parsing", "300-line code snippets", "Accurate semantic analysis", "Proper private/public repo detection", "Enhanced business logic detection", "Intelligent file prioritization"],
-  redirectUri: getRedirectUri()
+  features: ["Fixed AST parsing", "300-line code snippets", "Accurate semantic analysis", "Proper private/public repo detection", "Enhanced business logic detection", "Intelligent file prioritization"]
 }));
 
-// FIXED OAuth routes with consistent redirect URI handling
 app.get("/auth/github", (req, res) => {
   const state = crypto.randomBytes(16).toString('hex');
   req.session.oauthState = state;
-  
-  // Use the dedicated redirect URI function
-  const redirectUri = getRedirectUri();
-  
   const params = new URLSearchParams({
     client_id: process.env.GITHUB_CLIENT_ID,
-    redirect_uri: redirectUri,
-    scope: 'repo', 
-    state
+    redirect_uri: `${process.env.APP_URL || 'http://localhost:5000'}/auth/callback`,
+    scope: 'repo', state
   });
-  
-  console.log('OAuth redirect URI:', redirectUri);
-  console.log('Full OAuth URL:', `${GITHUB_OAUTH_URL}?${params}`);
-  
   res.redirect(`${GITHUB_OAUTH_URL}?${params}`);
 });
 
 app.get("/auth/callback", async (req, res) => {
   const { code, state } = req.query;
   
-  if (!state || state !== req.session.oauthState) {
-    console.log('OAuth state mismatch:', { received: state, expected: req.session.oauthState });
-    return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}?error=invalid_state`);
-  }
-  if (!code) {
-    return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}?error=access_denied`);
-  }
+  if (!state || state !== req.session.oauthState) return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}?error=invalid_state`);
+  if (!code) return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}?error=access_denied`);
   
   try {
-    // Use the same redirect URI function for consistency
-    const redirectUri = getRedirectUri();
-    
-    console.log('Token exchange redirect URI:', redirectUri);
-    
     const tokenResponse = await fetch(GITHUB_TOKEN_URL, {
-      method: 'POST', 
-      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        client_id: process.env.GITHUB_CLIENT_ID, 
-        client_secret: process.env.GITHUB_CLIENT_SECRET, 
-        code,
-        redirect_uri: redirectUri
+        client_id: process.env.GITHUB_CLIENT_ID, client_secret: process.env.GITHUB_CLIENT_SECRET, code,
+        redirect_uri: `${process.env.APP_URL || 'http://localhost:5000'}/auth/callback`
       })
     });
     
     const tokenData = await tokenResponse.json();
-    if (tokenData.error) {
-      console.error('GitHub OAuth error:', tokenData);
-      throw new Error(tokenData.error_description || tokenData.error);
-    }
+    if (tokenData.error) throw new Error(tokenData.error_description || tokenData.error);
     
     const userResponse = await fetch(`${GITHUB_API}/user`, {
-      headers: { 
-        'Authorization': `Bearer ${tokenData.access_token}`, 
-        'Accept': 'application/vnd.github.v3+json' 
-      }
+      headers: { 'Authorization': `Bearer ${tokenData.access_token}`, 'Accept': 'application/vnd.github.v3+json' }
     });
     const userData = await userResponse.json();
     
     req.session.github = {
       accessToken: tokenData.access_token,
-      user: { 
-        id: userData.id, 
-        login: userData.login, 
-        name: userData.name, 
-        avatar_url: userData.avatar_url 
-      }
+      user: { id: userData.id, login: userData.login, name: userData.name, avatar_url: userData.avatar_url }
     };
     
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    console.log('Redirecting to frontend:', `${frontendUrl}?auth=success`);
-    res.redirect(`${frontendUrl}?auth=success`);
+    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}?auth=success`);
   } catch (error) {
-    console.error('OAuth callback error:', error);
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    res.redirect(`${frontendUrl}?error=oauth_failed`);
+    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}?error=oauth_failed`);
   }
 });
 
-app.get("/auth/user", (req, res) => {
-  res.json(req.session.github ? { 
-    authenticated: true, 
-    user: req.session.github.user 
-  } : { 
-    authenticated: false, 
-    user: null 
-  });
-});
+app.get("/auth/user", (req, res) => res.json(req.session.github ? { authenticated: true, user: req.session.github.user } : { authenticated: false, user: null }));
 
 app.post("/auth/logout", (req, res) => {
-  req.session.destroy(err => {
-    if (err) {
-      console.error('Logout error:', err);
-      return res.status(500).json({ error: 'Failed to logout' });
-    }
-    res.json({ success: true });
-  });
+  req.session.destroy(err => err ? res.status(500).json({ error: 'Failed to logout' }) : res.json({ success: true }));
 });
 
 app.post("/check-repo", async (req, res) => {
@@ -595,49 +486,24 @@ app.post("/check-repo", async (req, res) => {
     const userToken = req.session.github?.accessToken;
     const accessCheck = await checkRepoAccess(repoInfo.owner, repoInfo.repo, userToken);
 
-    res.json({ 
-      ...accessCheck, 
-      repoInfo, 
-      userAuthenticated: !!req.session.github, 
-      canGenerate: accessCheck.accessible, 
-      needsAuth: accessCheck.requiresAuth && !userToken 
-    });
+    res.json({ ...accessCheck, repoInfo, userAuthenticated: !!req.session.github, canGenerate: accessCheck.accessible, needsAuth: accessCheck.requiresAuth && !userToken });
   } catch (error) {
-    console.error('Check repo error:', error);
-    res.status(500).json({ 
-      error: 'Failed to check repository access', 
-      details: error.message, 
-      accessible: false, 
-      requiresAuth: false 
-    });
+    res.status(500).json({ error: 'Failed to check repository access', details: error.message, accessible: false, requiresAuth: false });
   }
 });
 
 app.get("/test-gemini", async (req, res) => {
   try {
     const response = await fetch(`${GEMINI_API}?key=${process.env.GEMINI_API_KEY}`, {
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        contents: [{ 
-          parts: [{ 
-            text: "Hello! Respond with 'Fixed README generator with accurate code analysis working!'" 
-          }] 
-        }] 
-      })
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: "Hello! Respond with 'Fixed README generator with accurate code analysis working!'" }] }] })
     });
 
     const data = await response.json();
     const result = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
     
-    res.json({ 
-      success: response.ok, 
-      model: "gemini-2.0-flash-exp", 
-      response: result, 
-      hasApiKey: !!process.env.GEMINI_API_KEY 
-    });
+    res.json({ success: response.ok, model: "gemini-2.0-flash-exp", response: result, hasApiKey: !!process.env.GEMINI_API_KEY });
   } catch (error) {
-    console.error('Gemini test error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -645,24 +511,12 @@ app.get("/test-gemini", async (req, res) => {
 app.get("/progress/:sessionId", (req, res) => {
   const { sessionId } = req.params;
   
-  res.writeHead(200, { 
-    'Content-Type': 'text/event-stream', 
-    'Cache-Control': 'no-cache', 
-    'Connection': 'keep-alive', 
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Cache-Control'
-  });
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'Access-Control-Allow-Origin': '*' });
 
   activeConnections.set(sessionId, res);
-  res.write(`data: ${JSON.stringify({ 
-    step: 'connected', 
-    progress: 0, 
-    message: 'Connected to fixed code analysis stream with accurate repository detection' 
-  })}\n\n`);
+  res.write(`data: ${JSON.stringify({ step: 'connected', progress: 0, message: 'Connected to fixed code analysis stream with accurate repository detection' })}\n\n`);
 
-  req.on('close', () => {
-    activeConnections.delete(sessionId);
-  });
+  req.on('close', () => activeConnections.delete(sessionId));
 });
 
 app.post("/generate-readme", async (req, res) => {
@@ -677,22 +531,11 @@ app.post("/generate-readme", async (req, res) => {
 
     const progressCallback = (data) => {
       if (sessionId && activeConnections.has(sessionId)) {
-        const connection = activeConnections.get(sessionId);
-        try {
-          connection.write(`data: ${JSON.stringify(data)}\n\n`);
-        } catch (error) {
-          console.error('Progress callback error:', error);
-          activeConnections.delete(sessionId);
-        }
+        activeConnections.get(sessionId).write(`data: ${JSON.stringify(data)}\n\n`);
       }
     };
 
-    progressCallback({ 
-      step: 'initializing', 
-      progress: 5, 
-      message: 'Initializing fixed code analysis with accurate repository detection...', 
-      estimatedTime: 120 
-    });
+    progressCallback({ step: 'initializing', progress: 5, message: 'Initializing fixed code analysis with accurate repository detection...', estimatedTime: 120 });
 
     const accessCheck = await checkRepoAccess(repoInfo.owner, repoInfo.repo, userToken);
     
@@ -702,51 +545,25 @@ app.post("/generate-readme", async (req, res) => {
     }
 
     const repoData = accessCheck.repoData;
-    progressCallback({ 
-      step: 'fetching', 
-      progress: 10, 
-      message: `Scanning ${accessCheck.isPrivate ? 'private' : 'public'} repository structure...`, 
-      estimatedTime: 110 
-    });
+    progressCallback({ step: 'fetching', progress: 10, message: `Scanning ${accessCheck.isPrivate ? 'private' : 'public'} repository structure...`, estimatedTime: 110 });
 
     const files = await fetchRepoFiles(repoInfo.owner, repoInfo.repo, "", 0, progressCallback, userToken);
     if (files.length === 0) throw new Error("No accessible files found in repository");
 
-    progressCallback({ 
-      step: 'analyzing', 
-      progress: 25, 
-      message: 'Starting comprehensive code analysis with 300-line extraction...', 
-      estimatedTime: 90 
-    });
+    progressCallback({ step: 'analyzing', progress: 25, message: 'Starting comprehensive code analysis with 300-line extraction...', estimatedTime: 90 });
 
     const codeAnalysis = await performDeepCodeAnalysis(files, progressCallback);
     
-    progressCallback({ 
-      step: 'analyzing', 
-      progress: 60, 
-      message: 'Generating semantic analysis from extracted code...', 
-      estimatedTime: 50 
-    });
+    progressCallback({ step: 'analyzing', progress: 60, message: 'Generating semantic analysis from extracted code...', estimatedTime: 50 });
 
     const semanticAnalysis = generateSemanticAnalysis(codeAnalysis);
     
-    progressCallback({ 
-      step: 'generating', 
-      progress: 70, 
-      message: 'Creating intelligent README based on comprehensive analysis...', 
-      estimatedTime: 40 
-    });
+    progressCallback({ step: 'generating', progress: 70, message: 'Creating intelligent README based on comprehensive analysis...', estimatedTime: 40 });
 
     const readme = await generateIntelligentReadme(repoInfo, repoData, semanticAnalysis, codeAnalysis, progressCallback);
 
-    progressCallback({ 
-      step: 'complete', 
-      progress: 100, 
-      message: 'Fixed README generated successfully with accurate analysis!', 
-      estimatedTime: 0 
-    });
+    progressCallback({ step: 'complete', progress: 100, message: 'Fixed README generated successfully with accurate analysis!', estimatedTime: 0 });
 
-    // Close SSE connection after a delay
     setTimeout(() => {
       if (sessionId && activeConnections.has(sessionId)) {
         activeConnections.get(sessionId).end();
@@ -757,79 +574,44 @@ app.post("/generate-readme", async (req, res) => {
     res.json({
       readme,
       analysis: {
-        totalFiles: files.length, 
-        analyzedFiles: codeAnalysis.length, 
-        primaryLanguage: repoData.language, 
-        projectPurpose: semanticAnalysis.projectPurpose, 
-        technicalStack: semanticAnalysis.technicalStack, 
-        mainFeatures: semanticAnalysis.mainFeatures, 
-        apiEndpoints: semanticAnalysis.apiEndpoints.length, 
-        businessLogicItems: semanticAnalysis.businessLogic.length, 
-        intelligenceLevel: 'Fixed AST + 300-line Code Snippets + Accurate Semantic Analysis',
+        totalFiles: files.length, analyzedFiles: codeAnalysis.length, primaryLanguage: repoData.language, 
+        projectPurpose: semanticAnalysis.projectPurpose, technicalStack: semanticAnalysis.technicalStack, 
+        mainFeatures: semanticAnalysis.mainFeatures, apiEndpoints: semanticAnalysis.apiEndpoints.length, 
+        businessLogicItems: semanticAnalysis.businessLogic.length, intelligenceLevel: 'Fixed AST + 300-line Code Snippets + Accurate Semantic Analysis',
         codeSnippetsExtracted: codeAnalysis.filter(a => a.codeSnippets).length,
         totalCodeLines: codeAnalysis.reduce((total, analysis) => total + (analysis.codeSnippets ? analysis.codeSnippets.split('\n').length : 0), 0),
         repositoryType: accessCheck.accessLevel
       },
       semanticAnalysis: {
-        projectPurpose: semanticAnalysis.projectPurpose, 
-        technicalStack: semanticAnalysis.technicalStack,
-        mainFeatures: semanticAnalysis.mainFeatures, 
-        businessLogic: semanticAnalysis.businessLogic.slice(0, 25),
-        apiEndpoints: semanticAnalysis.apiEndpoints.slice(0, 20), 
-        keyFunctionality: semanticAnalysis.keyFunctionality
+        projectPurpose: semanticAnalysis.projectPurpose, technicalStack: semanticAnalysis.technicalStack,
+        mainFeatures: semanticAnalysis.mainFeatures, businessLogic: semanticAnalysis.businessLogic.slice(0, 25),
+        apiEndpoints: semanticAnalysis.apiEndpoints.slice(0, 20), keyFunctionality: semanticAnalysis.keyFunctionality
       },
       codeAnalysisDetails: codeAnalysis.map(analysis => ({
-        filename: analysis.filename, 
-        type: analysis.type, 
-        functionsFound: analysis.functions?.length || 0, 
-        classesFound: analysis.classes?.length || 0, 
-        importsFound: analysis.imports?.length || 0, 
-        apisFound: analysis.apis?.length || 0, 
-        featuresDetected: analysis.features?.length || 0,
-        hasCodeSnippets: !!analysis.codeSnippets, 
-        codeSnippetLines: analysis.codeSnippets ? analysis.codeSnippets.split('\n').length : 0
+        filename: analysis.filename, type: analysis.type, functionsFound: analysis.functions?.length || 0, 
+        classesFound: analysis.classes?.length || 0, importsFound: analysis.imports?.length || 0, 
+        apisFound: analysis.apis?.length || 0, featuresDetected: analysis.features?.length || 0,
+        hasCodeSnippets: !!analysis.codeSnippets, codeSnippetLines: analysis.codeSnippets ? analysis.codeSnippets.split('\n').length : 0
       })),
       model: "gemini-2.0-flash-exp",
       repository: {
-        name: repoData.full_name, 
-        description: repoData.description, 
-        stars: repoData.stargazers_count, 
-        forks: repoData.forks_count, 
-        language: repoData.language, 
-        size: repoData.size, 
-        private: repoData.private,
-        lastUpdated: repoData.updated_at, 
-        createdAt: repoData.created_at, 
-        accessLevel: accessCheck.accessLevel
+        name: repoData.full_name, description: repoData.description, stars: repoData.stargazers_count, 
+        forks: repoData.forks_count, language: repoData.language, size: repoData.size, private: repoData.private,
+        lastUpdated: repoData.updated_at, createdAt: repoData.created_at, accessLevel: accessCheck.accessLevel
       },
       user: req.session.github?.user || null
     });
 
   } catch (error) {
-    console.error('Generate README error:', error);
-    
-    // Send error through SSE if available
     if (req.body.sessionId && activeConnections.has(req.body.sessionId)) {
       const connection = activeConnections.get(req.body.sessionId);
-      try {
-        connection.write(`data: ${JSON.stringify({ 
-          step: 'error', 
-          progress: 0, 
-          message: error.message 
-        })}\n\n`);
-        connection.end();
-      } catch (sseError) {
-        console.error('SSE error send failed:', sseError);
-      }
+      connection.write(`data: ${JSON.stringify({ step: 'error', progress: 0, message: error.message })}\n\n`);
+      connection.end();
       activeConnections.delete(req.body.sessionId);
     }
     
     if (error.message === 'AUTH_REQUIRED') {
-      return res.status(401).json({ 
-        error: 'Authentication required for repository access', 
-        requiresAuth: true, 
-        details: 'This repository might be private or requires authentication for comprehensive analysis' 
-      });
+      return res.status(401).json({ error: 'Authentication required for repository access', requiresAuth: true, details: 'This repository might be private or requires authentication for comprehensive analysis' });
     }
     
     const status = error.message.includes('not found') || error.message.includes('REPO_INVALID') ? 404 : 
@@ -838,131 +620,51 @@ app.post("/generate-readme", async (req, res) => {
                    
     res.status(status).json({ 
       error: error.message,
-      details: error.message.includes('not found') || error.message.includes('REPO_INVALID') ? 
-        'Repository does not exist or is not accessible' : 
-        error.message.includes('Rate limit') ? 
-        'GitHub API rate limit exceeded. Please try again later.' : 
-        error.message.includes('REPO_PRIVATE') ? 
-        'Private repository requires authentication' : 
-        'Code analysis failed. Please try again.'
+      details: error.message.includes('not found') || error.message.includes('REPO_INVALID') ? 'Repository does not exist or is not accessible' : 
+        error.message.includes('Rate limit') ? 'GitHub API rate limit exceeded. Please try again later.' : 
+        error.message.includes('REPO_PRIVATE') ? 'Private repository requires authentication' : 'Code analysis failed. Please try again.'
     });
   }
 });
 
 app.get("/health", async (req, res) => {
   try {
-    const githubTest = process.env.GITHUB_TOKEN ? 
-      await makeRequest(`${GITHUB_API}/user`).then(() => true).catch(() => false) : false;
-    
-    const geminiTest = process.env.GEMINI_API_KEY ? 
-      await fetch(`${GEMINI_API}?key=${process.env.GEMINI_API_KEY}`, {
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: "test" }] }] })
-      }).then(r => r.ok).catch(() => false) : false;
+    const githubTest = process.env.GITHUB_TOKEN ? await makeRequest(`${GITHUB_API}/user`).then(() => true).catch(() => false) : false;
+    const geminiTest = process.env.GEMINI_API_KEY ? await fetch(`${GEMINI_API}?key=${process.env.GEMINI_API_KEY}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: "test" }] }] })
+    }).then(r => r.ok).catch(() => false) : false;
 
     res.json({
-      status: "healthy", 
-      version: "5.3-oauth-fixed",
-      capabilities: { 
-        fixedOAuthRedirectURI: true,
-        properEnvironmentVariableUsage: true,
-        enhancedErrorLogging: true,
-        fixedAstCodeParsing: true, 
-        accurateSemanticAnalysis: true, 
-        properRepoDetection: true, 
-        businessLogicDetection: true, 
-        intelligentFilePrioritization: true, 
-        jsAstAnalysis: true, 
-        pythonCodeAnalysis: true, 
-        enhancedCodeSnippets: true, 
-        upTo300LineAnalysis: true, 
-        publicPrivateRepoDistinction: true
-      },
-      environment: { 
-        hasGeminiKey: !!process.env.GEMINI_API_KEY, 
-        hasGithubToken: !!process.env.GITHUB_TOKEN, 
-        hasGithubOAuth: !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET), 
-        hasAppUrl: !!process.env.APP_URL,
-        hasOAuthCallbackUrl: !!process.env.OAUTH_CALLBACK_URL,
-        hasFrontendUrl: !!process.env.FRONTEND_URL,
-        port: PORT, 
-        nodeEnv: process.env.NODE_ENV || 'development',
-        redirectUri: getRedirectUri()
-      },
-      connectivity: { 
-        github: githubTest ? 'connected' : 'failed', 
-        gemini: geminiTest ? 'connected' : 'failed' 
-      },
-      model: "gemini-2.0-flash-exp", 
-      analysisEngine: "Fixed Babel AST + 300-line Code Snippets + Accurate Repository Detection",
-      codeAnalysisFeatures: { 
-        maxCodeLinesPerFile: 300, 
-        maxFileSize: "1MB", 
-        enhancedContentExtraction: true, 
-        intelligentSnippetSelection: true, 
-        frameworkDetection: true, 
-        businessLogicAnalysis: true, 
-        properErrorHandling: true, 
-        accurateRepoTypeDetection: true 
-      },
-      fixes: [
-        "Fixed OAuth redirect URI to use consistent getRedirectUri() function",
-        "Added support for OAUTH_CALLBACK_URL environment variable",
-        "Enhanced OAuth error logging and debugging",
-        "Fixed code analysis not reading actual code content", 
-        "Added proper public/private/invalid repository distinction", 
-        "Enhanced error handling and logging", 
-        "Improved AST parsing with better error recovery", 
-        "Fixed semantic analysis generation"
-      ],
+      status: "healthy", version: "5.2-fixed",
+      capabilities: { fixedAstCodeParsing: true, accurateSemanticAnalysis: true, properRepoDetection: true, businessLogicDetection: true, intelligentFilePrioritization: true, jsAstAnalysis: true, pythonCodeAnalysis: true, enhancedCodeSnippets: true, upTo300LineAnalysis: true, publicPrivateRepoDistinction: true },
+      environment: { hasGeminiKey: !!process.env.GEMINI_API_KEY, hasGithubToken: !!process.env.GITHUB_TOKEN, hasGithubOAuth: !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET), port: PORT, nodeEnv: process.env.NODE_ENV || 'development' },
+      connectivity: { github: githubTest ? 'connected' : 'failed', gemini: geminiTest ? 'connected' : 'failed' },
+      model: "gemini-2.0-flash-exp", analysisEngine: "Fixed Babel AST + 300-line Code Snippets + Accurate Repository Detection",
+      codeAnalysisFeatures: { maxCodeLinesPerFile: 300, maxFileSize: "1MB", enhancedContentExtraction: true, intelligentSnippetSelection: true, frameworkDetection: true, businessLogicAnalysis: true, properErrorHandling: true, accurateRepoTypeDetection: true },
+      fixes: ["Fixed code analysis not reading actual code content", "Added proper public/private/invalid repository distinction", "Enhanced error handling and logging", "Improved AST parsing with better error recovery", "Fixed semantic analysis generation"],
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    console.error('Health check error:', error);
-    res.status(500).json({ 
-      status: "unhealthy", 
-      error: error.message, 
-      timestamp: new Date().toISOString() 
-    });
+    res.status(500).json({ status: "unhealthy", error: error.message, timestamp: new Date().toISOString() });
   }
 });
 
-// Error handling middleware
 app.use((error, req, res, next) => {
-  console.error('Unhandled error:', error);
-  res.status(500).json({ 
-    error: 'Internal server error', 
-    message: error.message, 
-    timestamp: new Date().toISOString() 
-  });
+  res.status(500).json({ error: 'Internal server error', message: error.message, timestamp: new Date().toISOString() });
 });
 
-// 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({
-    error: 'Not found', 
-    message: `Route ${req.method} ${req.originalUrl} not found`,
-    availableRoutes: [
-      'GET /', 
-      'GET /health', 
-      'GET /test-gemini', 
-      'POST /generate-readme', 
-      'POST /check-repo', 
-      'GET /auth/github', 
-      'GET /auth/callback', 
-      'GET /auth/user', 
-      'POST /auth/logout', 
-      'GET /progress/:sessionId'
-    ]
+    error: 'Not found', message: `Route ${req.method} ${req.originalUrl} not found`,
+    availableRoutes: ['GET /', 'GET /health', 'GET /test-gemini', 'POST /generate-readme', 'POST /check-repo', 'GET /auth/github', 'GET /auth/callback', 'GET /auth/user', 'POST /auth/logout', 'GET /progress/:sessionId']
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Fixed README Generator v5.3 running on port ${PORT}`);
-  console.log(`🔧 OAUTH FIX: Consistent redirect URI handling with getRedirectUri() function`);
-  console.log(`🔗 OAuth Redirect URI: ${getRedirectUri()}`);
-  console.log(`🔒 Session handling optimized for production deployments`);
+  console.log(`🚀 Fixed README Generator v5.2 running on port ${PORT}`);
+  console.log(`🔧 FIXES: Code analysis now properly reads and analyzes actual code content`);
+  console.log(`🔍 ENHANCEMENT: Proper public/private/invalid repository detection`);
   console.log(`🧠 Enhanced AST-powered code analysis with up to 300 lines per file`);
   console.log(`📊 Accurate semantic analysis with comprehensive business logic detection`);
   console.log(`📝 Code Analysis: Up to 300 lines per file, 1MB file size limit, 50 priority files`);
@@ -970,10 +672,8 @@ app.listen(PORT, () => {
   console.log(`🔑 GitHub OAuth: ${process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET ? '✅ Configured' : '❌ Missing'}`);
   console.log(`🔑 Gemini Key: ${process.env.GEMINI_API_KEY ? '✅ Active' : '❌ Missing'}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🌐 App URL: ${process.env.APP_URL || 'Auto-detected from request headers'}`);
-  console.log(`🔗 OAuth Callback URL: ${process.env.OAUTH_CALLBACK_URL || 'Constructed from APP_URL'}`);
+  console.log(`🌐 App URL: ${process.env.APP_URL || 'http://localhost:5000'}`);
   console.log(`🎯 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
-  console.log(`🔧 OAuth Fix: Dedicated getRedirectUri() function for consistent URL handling`);
 });
 
 export default app;
