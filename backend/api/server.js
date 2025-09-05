@@ -16,6 +16,22 @@ const GITHUB_OAUTH_URL = "https://github.com/login/oauth/authorize";
 const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const activeConnections = new Map();
 
+// Helper function to get the correct redirect URI
+const getRedirectUri = () => {
+  // Use explicit OAUTH_CALLBACK_URL if provided
+  if (process.env.OAUTH_CALLBACK_URL) {
+    return process.env.OAUTH_CALLBACK_URL;
+  }
+  
+  // Otherwise construct from APP_URL
+  if (process.env.APP_URL) {
+    return `${process.env.APP_URL}/auth/callback`;
+  }
+  
+  // Default for development
+  return 'http://localhost:5000/auth/callback';
+};
+
 // Helper function to get the correct base URL
 const getBaseUrl = (req) => {
   if (process.env.APP_URL) {
@@ -452,20 +468,20 @@ Return ONLY the markdown content without any wrapper text.`;
 
 // Routes
 app.get("/", (req, res) => res.json({
-  message: "Fixed README Generator v5.2 with Accurate Code Analysis",
+  message: "Fixed README Generator v5.3 with Proper OAuth Configuration",
   endpoints: ["/health", "/test-gemini", "/generate-readme", "/auth/github", "/auth/callback", "/auth/user", "/auth/logout"],
   model: "gemini-2.0-flash-exp", 
-  features: ["Fixed AST parsing", "300-line code snippets", "Accurate semantic analysis", "Proper private/public repo detection", "Enhanced business logic detection", "Intelligent file prioritization"]
+  features: ["Fixed OAuth redirect URI handling", "Proper environment variable usage", "Enhanced error logging", "Fixed AST parsing", "300-line code snippets", "Accurate semantic analysis", "Proper private/public repo detection", "Enhanced business logic detection", "Intelligent file prioritization"],
+  redirectUri: getRedirectUri()
 }));
 
-// FIXED OAuth routes with correct URL handling
+// FIXED OAuth routes with consistent redirect URI handling
 app.get("/auth/github", (req, res) => {
   const state = crypto.randomBytes(16).toString('hex');
   req.session.oauthState = state;
   
-  // Get the correct base URL for this deployment
-  const baseUrl = getBaseUrl(req);
-  const redirectUri = `${baseUrl}/auth/callback`;
+  // Use the dedicated redirect URI function
+  const redirectUri = getRedirectUri();
   
   const params = new URLSearchParams({
     client_id: process.env.GITHUB_CLIENT_ID,
@@ -474,8 +490,8 @@ app.get("/auth/github", (req, res) => {
     state
   });
   
-  console.log('OAuth redirect URI:', redirectUri); // For debugging
-  console.log('Base URL:', baseUrl); // For debugging
+  console.log('OAuth redirect URI:', redirectUri);
+  console.log('Full OAuth URL:', `${GITHUB_OAUTH_URL}?${params}`);
   
   res.redirect(`${GITHUB_OAUTH_URL}?${params}`);
 });
@@ -492,11 +508,10 @@ app.get("/auth/callback", async (req, res) => {
   }
   
   try {
-    // Get the correct base URL for token exchange
-    const baseUrl = getBaseUrl(req);
-    const redirectUri = `${baseUrl}/auth/callback`;
+    // Use the same redirect URI function for consistency
+    const redirectUri = getRedirectUri();
     
-    console.log('Token exchange redirect URI:', redirectUri); // For debugging
+    console.log('Token exchange redirect URI:', redirectUri);
     
     const tokenResponse = await fetch(GITHUB_TOKEN_URL, {
       method: 'POST', 
@@ -842,8 +857,11 @@ app.get("/health", async (req, res) => {
 
     res.json({
       status: "healthy", 
-      version: "5.2-fixed",
+      version: "5.3-oauth-fixed",
       capabilities: { 
+        fixedOAuthRedirectURI: true,
+        properEnvironmentVariableUsage: true,
+        enhancedErrorLogging: true,
         fixedAstCodeParsing: true, 
         accurateSemanticAnalysis: true, 
         properRepoDetection: true, 
@@ -853,17 +871,18 @@ app.get("/health", async (req, res) => {
         pythonCodeAnalysis: true, 
         enhancedCodeSnippets: true, 
         upTo300LineAnalysis: true, 
-        publicPrivateRepoDistinction: true,
-        fixedOAuthCallbacks: true
+        publicPrivateRepoDistinction: true
       },
       environment: { 
         hasGeminiKey: !!process.env.GEMINI_API_KEY, 
         hasGithubToken: !!process.env.GITHUB_TOKEN, 
         hasGithubOAuth: !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET), 
         hasAppUrl: !!process.env.APP_URL,
+        hasOAuthCallbackUrl: !!process.env.OAUTH_CALLBACK_URL,
         hasFrontendUrl: !!process.env.FRONTEND_URL,
         port: PORT, 
-        nodeEnv: process.env.NODE_ENV || 'development' 
+        nodeEnv: process.env.NODE_ENV || 'development',
+        redirectUri: getRedirectUri()
       },
       connectivity: { 
         github: githubTest ? 'connected' : 'failed', 
@@ -882,9 +901,9 @@ app.get("/health", async (req, res) => {
         accurateRepoTypeDetection: true 
       },
       fixes: [
-        "Fixed OAuth callback URLs to work correctly in production", 
-        "Added proper base URL detection for deployed environments",
-        "Enhanced session handling for production deployments",
+        "Fixed OAuth redirect URI to use consistent getRedirectUri() function",
+        "Added support for OAUTH_CALLBACK_URL environment variable",
+        "Enhanced OAuth error logging and debugging",
         "Fixed code analysis not reading actual code content", 
         "Added proper public/private/invalid repository distinction", 
         "Enhanced error handling and logging", 
@@ -934,9 +953,9 @@ app.use('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Fixed README Generator v5.2 running on port ${PORT}`);
-  console.log(`🔧 FIXES: OAuth callback URLs now work correctly in production`);
-  console.log(`🔍 ENHANCEMENT: Proper base URL detection for deployed environments`);
+  console.log(`🚀 Fixed README Generator v5.3 running on port ${PORT}`);
+  console.log(`🔧 OAUTH FIX: Consistent redirect URI handling with getRedirectUri() function`);
+  console.log(`🔗 OAuth Redirect URI: ${getRedirectUri()}`);
   console.log(`🔒 Session handling optimized for production deployments`);
   console.log(`🧠 Enhanced AST-powered code analysis with up to 300 lines per file`);
   console.log(`📊 Accurate semantic analysis with comprehensive business logic detection`);
@@ -946,8 +965,9 @@ app.listen(PORT, () => {
   console.log(`🔑 Gemini Key: ${process.env.GEMINI_API_KEY ? '✅ Active' : '❌ Missing'}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌐 App URL: ${process.env.APP_URL || 'Auto-detected from request headers'}`);
+  console.log(`🔗 OAuth Callback URL: ${process.env.OAUTH_CALLBACK_URL || 'Constructed from APP_URL'}`);
   console.log(`🎯 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
-  console.log(`🔧 OAuth Fix: Dynamic base URL detection for production deployments`);
+  console.log(`🔧 OAuth Fix: Dedicated getRedirectUri() function for consistent URL handling`);
 });
 
 export default app;
